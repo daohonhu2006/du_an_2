@@ -1281,3 +1281,25 @@ dialog.auth-modal {
   flex-wrap: wrap;
   gap: 0.45rem;
 }
+
+.custom-tuition-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+  margin-bottom: 1rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 10px;
+  background: var(--surface-alt);
+  border: 1px dashed var(--border);
+}
+
+.custom-tuition-form .input {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.custom-tuition-form .custom-tc-input {
+  flex: 0 0 92px;
+  text-align: center;
+}

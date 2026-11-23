@@ -229,6 +229,16 @@
           </div>
         </div>
 
+        <form id="custom-tuition-form" class="custom-tuition-form">
+          <input type="text" id="custom-tuition-name" class="input" required placeholder="Tên môn học chưa có lịch (VD: Thực tập, Khóa luận...)" aria-label="Tên môn học tự thêm">
+          <input type="number" id="custom-tuition-credits" class="input custom-tc-input" required min="0.5" max="20" step="0.5" value="3" placeholder="Số TC" aria-label="Số tín chỉ">
+          <select id="custom-tuition-type" class="select" aria-label="Chọn Lý thuyết hoặc Thực hành">
+            <option value="lt">Lý thuyết</option>
+            <option value="th">Thực hành</option>
+          </select>
+          <button type="submit" class="btn btn-primary">+ Thêm môn tính học phí</button>
+        </form>
+
         <div class="table-wrap">
           <table class="tuition-table">
             <thead>

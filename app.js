@@ -8,6 +8,7 @@
     TUITION_RATE_LT: 'huit_dkhp_tuition_rate_lt_v1',
     TUITION_RATE_TH: 'huit_dkhp_tuition_rate_v1',
     TUITION_SELECTIONS: 'huit_dkhp_tuition_selections_v1',
+    CUSTOM_TUITION: 'huit_dkhp_custom_tuition_v1',
     USERS: 'huit_dkhp_users_v1',
     CURRENT_USER: 'huit_dkhp_current_user_v1',
   };
@@ -22,6 +23,7 @@
   })();
   let catalog = loadState(STORAGE_KEYS.CATALOG, []);
   let registered = loadState(STORAGE_KEYS.REGISTERED, []);
+  let customTuitionItems = loadState(STORAGE_KEYS.CUSTOM_TUITION, []);
   let tuitionSelections = loadObjectState(STORAGE_KEYS.TUITION_SELECTIONS, {});
 
   // DOM Elements
@@ -95,10 +97,12 @@
     try {
       localStorage.setItem(STORAGE_KEYS.CATALOG, JSON.stringify(catalog));
       localStorage.setItem(STORAGE_KEYS.REGISTERED, JSON.stringify(registered));
+      localStorage.setItem(STORAGE_KEYS.CUSTOM_TUITION, JSON.stringify(customTuitionItems));
       if (currentUser) {
         const userPayload = {
           catalog,
           registered,
+          customTuitionItems,
           tuitionSelections,
           rateLt: tuitionRateLtInput?.value || '750000',
           rateTh: tuitionRateInput?.value || '850000',
@@ -968,12 +972,31 @@
     timetableTbody.innerHTML = rows.join('');
   }
 
+  function getAllTuitionRows() {
+    return [
+      ...registered.map((sec) => ({ ...sec, isCustom: false })),
+      ...customTuitionItems.map((item) => ({
+        maLHP: item.id,
+        tenHP: item.tenHP,
+        soTC: item.soTC,
+        defaultType: item.type === 'th' ? 'th' : 'lt',
+        isCustom: true,
+      })),
+    ];
+  }
+
   function getTuitionSelection(sec) {
     const existing = tuitionSelections[sec.maLHP];
     if (existing && typeof existing === 'object') {
       return {
         checked: existing.checked !== false,
         type: existing.type === 'lt' || existing.type === 'th' ? existing.type : 'lt',
+      };
+    }
+    if (sec.isCustom) {
+      return {
+        checked: true,
+        type: sec.defaultType === 'th' ? 'th' : 'lt',
       };
     }
     const secSess = getSectionSessions(sec);
@@ -1000,8 +1023,9 @@
     if (!tuitionTbody) return;
     const rateLt = Math.max(0, Number(tuitionRateLtInput?.value) || 0);
     const rateTh = Math.max(0, Number(tuitionRateInput?.value) || 0);
+    const allRows = getAllTuitionRows();
 
-    if (registered.length === 0) {
+    if (allRows.length === 0) {
       if (tuitionCheckAll) tuitionCheckAll.checked = false;
       if (tuitionTotalLtCreditsEl) tuitionTotalLtCreditsEl.textContent = '0';
       tuitionTotalThCreditsEl.textContent = '0';
@@ -1009,7 +1033,7 @@
       tuitionTbody.innerHTML = `
         <tr>
           <td colspan="6" style="text-align:center;padding:2rem;color:var(--text-muted);">
-            Chưa có học phần nào được đăng ký. Hãy chọn học phần ở tab <strong>Đăng ký học phần</strong> để tính học phí.
+            Chưa có học phần nào. Hãy chọn học phần ở tab <strong>Đăng ký học phần</strong> hoặc thêm môn chưa có lịch ở khung phía trên.
           </td>
         </tr>
       `;
@@ -1021,7 +1045,7 @@
     let totalAmount = 0;
     let allChecked = true;
 
-    tuitionTbody.innerHTML = registered
+    tuitionTbody.innerHTML = allRows
       .map((sec) => {
         const sel = getTuitionSelection(sec);
         if (!sel.checked) allChecked = false;
@@ -1036,6 +1060,12 @@
         }
 
         const radioName = `tuition-type-${sec.maLHP}`;
+        const subInfo = sec.isCustom
+          ? `<div class="course-code">Tự thêm • Chưa có lịch <button type="button" class="btn btn-sm btn-danger-outline" style="padding:0.1rem 0.45rem;font-size:0.72rem;margin-left:0.35rem;" data-remove-custom-tuition="${escapeHtml(sec.maLHP)}">Xóa</button></div>`
+          : sec.lopHoc
+          ? `<div class="course-code">Lớp: ${escapeHtml(sec.lopHoc)}</div>`
+          : '';
+
         return `
           <tr class="${sel.checked ? '' : 'tuition-row-unchecked'}">
             <td class="col-check">
@@ -1043,9 +1073,9 @@
             </td>
             <td>
               <div class="course-name">${escapeHtml(sec.tenHP)}</div>
-              ${sec.lopHoc ? `<div class="course-code">Lớp: ${escapeHtml(sec.lopHoc)}</div>` : ''}
+              ${subInfo}
             </td>
-            <td><code>${escapeHtml(sec.maLHP)}</code></td>
+            <td><code>${sec.isCustom ? 'Tự thêm' : escapeHtml(sec.maLHP)}</code></td>
             <td><strong>${escapeHtml(credits)}</strong></td>
             <td>
               <div class="tuition-choice-group">
@@ -1762,7 +1792,7 @@
   if (tuitionCheckAll) {
     tuitionCheckAll.addEventListener('change', () => {
       const isChecked = tuitionCheckAll.checked;
-      for (const sec of registered) {
+      for (const sec of getAllTuitionRows()) {
         const cur = getTuitionSelection(sec);
         tuitionSelections[sec.maLHP] = { ...cur, checked: isChecked };
       }
@@ -1771,12 +1801,44 @@
     });
   }
 
+  const customTuitionForm = document.getElementById('custom-tuition-form');
+  const customTuitionName = document.getElementById('custom-tuition-name');
+  const customTuitionCredits = document.getElementById('custom-tuition-credits');
+  const customTuitionType = document.getElementById('custom-tuition-type');
+
+  if (customTuitionForm) {
+    customTuitionForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const tenHP = customTuitionName.value.trim();
+      const soTC = Number(customTuitionCredits.value);
+      const type = customTuitionType.value === 'th' ? 'th' : 'lt';
+      if (!tenHP || !soTC || soTC <= 0) return;
+
+      const id = `CUSTOM-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      customTuitionItems.push({ id, tenHP, soTC, type });
+      tuitionSelections[id] = { checked: true, type };
+      customTuitionName.value = '';
+      saveTuitionSelections();
+      renderTuition();
+    });
+  }
+
   if (tuitionTbody) {
+    tuitionTbody.addEventListener('click', (e) => {
+      const removeBtn = e.target.closest('[data-remove-custom-tuition]');
+      if (!removeBtn) return;
+      const id = removeBtn.dataset.removeCustomTuition;
+      customTuitionItems = customTuitionItems.filter((item) => item.id !== id);
+      delete tuitionSelections[id];
+      saveTuitionSelections();
+      renderTuition();
+    });
+
     tuitionTbody.addEventListener('change', (e) => {
       const checkEl = e.target.closest('[data-tuition-check]');
       if (checkEl) {
         const maLHP = checkEl.dataset.tuitionCheck;
-        const sec = registered.find((r) => r.maLHP === maLHP);
+        const sec = getAllTuitionRows().find((r) => r.maLHP === maLHP);
         if (sec) {
           const cur = getTuitionSelection(sec);
           tuitionSelections[maLHP] = { ...cur, checked: checkEl.checked };
@@ -1789,7 +1851,7 @@
       const radioEl = e.target.closest('[data-tuition-type]');
       if (radioEl) {
         const maLHP = radioEl.dataset.tuitionType;
-        const sec = registered.find((r) => r.maLHP === maLHP);
+        const sec = getAllTuitionRows().find((r) => r.maLHP === maLHP);
         if (sec) {
           const cur = getTuitionSelection(sec);
           tuitionSelections[maLHP] = { ...cur, type: radioEl.value === 'th' ? 'th' : 'lt' };
@@ -2140,6 +2202,7 @@
       if (hasSavedContent || !migrateCurrentIfEmpty) {
         catalog = Array.isArray(saved.catalog) ? saved.catalog : [];
         registered = Array.isArray(saved.registered) ? saved.registered : [];
+        customTuitionItems = Array.isArray(saved.customTuitionItems) ? saved.customTuitionItems : [];
         tuitionSelections =
           saved.tuitionSelections && typeof saved.tuitionSelections === 'object' ? saved.tuitionSelections : {};
         if (tuitionRateLtInput && saved.rateLt !== undefined) tuitionRateLtInput.value = saved.rateLt;
@@ -2160,11 +2223,13 @@
     currentUser = null;
     catalog = [];
     registered = [];
+    customTuitionItems = [];
     tuitionSelections = {};
     try {
       localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
       localStorage.removeItem(STORAGE_KEYS.CATALOG);
       localStorage.removeItem(STORAGE_KEYS.REGISTERED);
+      localStorage.removeItem(STORAGE_KEYS.CUSTOM_TUITION);
       localStorage.removeItem(STORAGE_KEYS.TUITION_SELECTIONS);
     } catch {
       // Ignore
@@ -2239,6 +2304,7 @@
       data: {
         catalog,
         registered,
+        customTuitionItems,
         tuitionSelections,
         rateLt: tuitionRateLtInput?.value || '750000',
         rateTh: tuitionRateInput?.value || '850000',
@@ -2272,6 +2338,7 @@
         const d = parsed.data;
         catalog = Array.isArray(d.catalog) ? d.catalog : [];
         registered = Array.isArray(d.registered) ? d.registered : [];
+        customTuitionItems = Array.isArray(d.customTuitionItems) ? d.customTuitionItems : [];
         tuitionSelections = d.tuitionSelections && typeof d.tuitionSelections === 'object' ? d.tuitionSelections : {};
         if (tuitionRateLtInput && d.rateLt !== undefined) tuitionRateLtInput.value = d.rateLt;
         if (tuitionRateInput && d.rateTh !== undefined) tuitionRateInput.value = d.rateTh;
