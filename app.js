@@ -9,6 +9,7 @@
     TUITION_RATE_TH: 'huit_dkhp_tuition_rate_v1',
     TUITION_SELECTIONS: 'huit_dkhp_tuition_selections_v1',
     CUSTOM_TUITION: 'huit_dkhp_custom_tuition_v1',
+    CALENDAR_EVENTS: 'huit_dkhp_calendar_events_v1',
     USERS: 'huit_dkhp_users_v1',
     CURRENT_USER: 'huit_dkhp_current_user_v1',
   };
@@ -24,6 +25,7 @@
   let catalog = loadState(STORAGE_KEYS.CATALOG, []);
   let registered = loadState(STORAGE_KEYS.REGISTERED, []);
   let customTuitionItems = loadState(STORAGE_KEYS.CUSTOM_TUITION, []);
+  let calendarEvents = loadObjectState(STORAGE_KEYS.CALENDAR_EVENTS, {});
   let tuitionSelections = loadObjectState(STORAGE_KEYS.TUITION_SELECTIONS, {});
 
   // DOM Elements
@@ -50,6 +52,7 @@
   const viewTabs = Array.from(document.querySelectorAll('.view-tab'));
   const panelRegister = document.getElementById('panel-register');
   const panelTimetable = document.getElementById('panel-timetable');
+  const panelCalendar = document.getElementById('panel-calendar');
   const panelTuition = document.getElementById('panel-tuition');
   const panelExcel = document.getElementById('panel-excel');
 
@@ -98,11 +101,13 @@
       localStorage.setItem(STORAGE_KEYS.CATALOG, JSON.stringify(catalog));
       localStorage.setItem(STORAGE_KEYS.REGISTERED, JSON.stringify(registered));
       localStorage.setItem(STORAGE_KEYS.CUSTOM_TUITION, JSON.stringify(customTuitionItems));
+      localStorage.setItem(STORAGE_KEYS.CALENDAR_EVENTS, JSON.stringify(calendarEvents));
       if (currentUser) {
         const userPayload = {
           catalog,
           registered,
           customTuitionItems,
+          calendarEvents,
           tuitionSelections,
           rateLt: tuitionRateLtInput?.value || '750000',
           rateTh: tuitionRateInput?.value || '850000',
@@ -1106,6 +1111,7 @@
     renderCatalog();
     renderRegistered();
     renderTimetable();
+    renderCalendar();
     renderTuition();
   }
 
@@ -1862,6 +1868,291 @@
     });
   }
 
+  // --- Monthly / Weekly / Daily Calendar ---
+  const calPrevBtn = document.getElementById('cal-prev-btn');
+  const calNextBtn = document.getElementById('cal-next-btn');
+  const calTodayBtn = document.getElementById('cal-today-btn');
+  const calHeading = document.getElementById('calendar-heading');
+  const calGridContainer = document.getElementById('cal-grid-container');
+  const calSelectedTitle = document.getElementById('cal-selected-title');
+  const calSelectedItems = document.getElementById('cal-selected-items');
+  const calEventForm = document.getElementById('cal-event-form');
+  const calEventTitle = document.getElementById('cal-event-title');
+  const calEventTime = document.getElementById('cal-event-time');
+  const calModeBtns = Array.from(document.querySelectorAll('[data-cal-mode]'));
+
+  let calMode = 'month';
+  let calSelectedDate = new Date();
+  let calViewYear = calSelectedDate.getFullYear();
+  let calViewMonth = calSelectedDate.getMonth();
+
+  function toDateKey(d) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
+  function jsDayToHuitThu(jsDay) {
+    return jsDay === 0 ? 8 : jsDay + 1;
+  }
+
+  function getRegisteredClassesForDate(d) {
+    const thu = jsDayToHuitThu(d.getDay());
+    const list = [];
+    for (const sec of registered) {
+      const secSess = getSectionSessions(sec);
+      for (const item of secSess.all) {
+        if (Number(item.sess.thu) === thu) {
+          list.push({
+            kind: item.code.toLowerCase(),
+            label: item.code,
+            tenHP: sec.tenHP,
+            maLHP: sec.maLHP,
+            clock: getSessionClockRange(item.sess, item.code),
+            phong: item.sess.phong,
+            gv: item.sess.gv,
+          });
+        }
+      }
+    }
+    return list;
+  }
+
+  function getCustomEventsForDate(d) {
+    const key = toDateKey(d);
+    return Array.isArray(calendarEvents[key]) ? calendarEvents[key] : [];
+  }
+
+  function dateHasAnyItem(d) {
+    return getCustomEventsForDate(d).length > 0 || getRegisteredClassesForDate(d).length > 0;
+  }
+
+  function renderCalendar() {
+    if (!calGridContainer || !calHeading) return;
+    calHeading.textContent = `tháng ${calViewMonth + 1}, ${calViewYear}`;
+
+    const todayKey = toDateKey(new Date());
+    const selectedKey = toDateKey(calSelectedDate);
+
+    if (calMode === 'month') {
+      const firstOfMonth = new Date(calViewYear, calViewMonth, 1);
+      const startOffset = (firstOfMonth.getDay() + 6) % 7; // Monday = 0 .. Sunday = 6
+      const startDate = new Date(calViewYear, calViewMonth, 1 - startOffset);
+
+      const cellsHtml = [];
+      for (let i = 0; i < 42; i++) {
+        const d = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() + i);
+        const key = toDateKey(d);
+        const isCurrentMonth = d.getMonth() === calViewMonth;
+        const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+        const hasDot = dateHasAnyItem(d);
+
+        const cls = [
+          'cal-day-btn',
+          isCurrentMonth ? '' : 'other-month',
+          isWeekend ? 'weekend' : '',
+          key === todayKey ? 'is-today' : '',
+          key === selectedKey ? 'is-selected' : '',
+        ]
+          .filter(Boolean)
+          .join(' ');
+
+        cellsHtml.push(`
+          <button type="button" class="${cls}" data-cal-date="${key}">
+            <span>${d.getDate()}</span>
+            ${hasDot ? '<span class="cal-dot" aria-hidden="true"></span>' : '<span style="height:6px;"></span>'}
+          </button>
+        `);
+      }
+
+      calGridContainer.innerHTML = `
+        <div class="cal-weekdays">
+          <div class="cal-weekday">Th 2</div>
+          <div class="cal-weekday">Th 3</div>
+          <div class="cal-weekday">Th 4</div>
+          <div class="cal-weekday">Th 5</div>
+          <div class="cal-weekday">Th 6</div>
+          <div class="cal-weekday weekend">Th 7</div>
+          <div class="cal-weekday weekend">CN</div>
+        </div>
+        <div class="cal-days-grid">${cellsHtml.join('')}</div>
+      `;
+    } else if (calMode === 'week') {
+      const offset = (calSelectedDate.getDay() + 6) % 7;
+      const monday = new Date(
+        calSelectedDate.getFullYear(),
+        calSelectedDate.getMonth(),
+        calSelectedDate.getDate() - offset
+      );
+      const weekCells = [];
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i);
+        const key = toDateKey(d);
+        const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+        const hasDot = dateHasAnyItem(d);
+        const cls = [
+          'cal-day-btn',
+          isWeekend ? 'weekend' : '',
+          key === todayKey ? 'is-today' : '',
+          key === selectedKey ? 'is-selected' : '',
+        ]
+          .filter(Boolean)
+          .join(' ');
+        weekCells.push(`
+          <button type="button" class="${cls}" data-cal-date="${key}">
+            <span>${d.getDate()}/${d.getMonth() + 1}</span>
+            ${hasDot ? '<span class="cal-dot" aria-hidden="true"></span>' : '<span style="height:6px;"></span>'}
+          </button>
+        `);
+      }
+      calGridContainer.innerHTML = `
+        <div class="cal-weekdays">
+          <div class="cal-weekday">Th 2</div>
+          <div class="cal-weekday">Th 3</div>
+          <div class="cal-weekday">Th 4</div>
+          <div class="cal-weekday">Th 5</div>
+          <div class="cal-weekday">Th 6</div>
+          <div class="cal-weekday weekend">Th 7</div>
+          <div class="cal-weekday weekend">CN</div>
+        </div>
+        <div class="cal-days-grid">${weekCells.join('')}</div>
+      `;
+    } else {
+      const thuLabel = formatThu(jsDayToHuitThu(calSelectedDate.getDay()));
+      calGridContainer.innerHTML = `
+        <div style="text-align:center;padding:1.5rem 0.5rem;">
+          <div class="muted">${escapeHtml(thuLabel)}</div>
+          <div style="font-size:2.4rem;font-weight:800;color:#dc2626;line-height:1.1;margin:0.3rem 0;">${calSelectedDate.getDate()}</div>
+          <div style="font-weight:600;">Tháng ${calSelectedDate.getMonth() + 1}, ${calSelectedDate.getFullYear()}</div>
+        </div>
+      `;
+    }
+
+    // Chi tiết ngày đã chọn
+    const thuStr = formatThu(jsDayToHuitThu(calSelectedDate.getDay()));
+    calSelectedTitle.textContent = `${thuStr}, ngày ${calSelectedDate.getDate()}/${calSelectedDate.getMonth() + 1}/${calSelectedDate.getFullYear()}`;
+
+    const customItems = getCustomEventsForDate(calSelectedDate);
+    const classItems = getRegisteredClassesForDate(calSelectedDate);
+
+    if (customItems.length === 0 && classItems.length === 0) {
+      calSelectedItems.innerHTML = '<div class="muted small-note">Chưa có lịch học hoặc nhắc nhở nào trong ngày này.</div>';
+      return;
+    }
+
+    const customHtml = customItems.map(
+      (ev) => `
+      <div class="cal-agenda-item custom">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:0.4rem;">
+          <div>
+            <strong>${escapeHtml(ev.title)}</strong>
+            ${ev.time ? `<div class="sched-meta">Giờ: ${escapeHtml(ev.time)}</div>` : ''}
+          </div>
+          <button type="button" class="btn btn-sm btn-danger-outline" style="padding:0.15rem 0.45rem;font-size:0.74rem;" data-del-cal-ev="${escapeHtml(ev.id)}">Xóa</button>
+        </div>
+      </div>
+    `
+    );
+
+    const classHtml = classItems.map(
+      (c) => `
+      <div class="cal-agenda-item ${c.kind}">
+        <div><span class="badge badge-${c.kind}">${c.label}</span> <strong>${escapeHtml(c.tenHP)}</strong></div>
+        <div class="sched-meta">${escapeHtml(c.clock || '')} • ${escapeHtml(c.phong || '—')}</div>
+        ${c.gv ? `<div class="sched-meta">GV: ${escapeHtml(c.gv)}</div>` : ''}
+      </div>
+    `
+    );
+
+    calSelectedItems.innerHTML = [...customHtml, ...classHtml].join('');
+  }
+
+  if (calPrevBtn) {
+    calPrevBtn.addEventListener('click', () => {
+      if (calViewMonth === 0) {
+        calViewMonth = 11;
+        calViewYear--;
+      } else {
+        calViewMonth--;
+      }
+      renderCalendar();
+    });
+  }
+
+  if (calNextBtn) {
+    calNextBtn.addEventListener('click', () => {
+      if (calViewMonth === 11) {
+        calViewMonth = 0;
+        calViewYear++;
+      } else {
+        calViewMonth++;
+      }
+      renderCalendar();
+    });
+  }
+
+  if (calTodayBtn) {
+    calTodayBtn.addEventListener('click', () => {
+      const now = new Date();
+      calSelectedDate = now;
+      calViewYear = now.getFullYear();
+      calViewMonth = now.getMonth();
+      renderCalendar();
+    });
+  }
+
+  for (const btn of calModeBtns) {
+    btn.addEventListener('click', () => {
+      calMode = btn.dataset.calMode;
+      for (const b of calModeBtns) {
+        b.setAttribute('aria-pressed', String(b === btn));
+      }
+      renderCalendar();
+    });
+  }
+
+  if (calGridContainer) {
+    calGridContainer.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-cal-date]');
+      if (!btn) return;
+      const [y, m, d] = btn.dataset.calDate.split('-').map(Number);
+      calSelectedDate = new Date(y, m - 1, d);
+      calViewYear = calSelectedDate.getFullYear();
+      calViewMonth = calSelectedDate.getMonth();
+      renderCalendar();
+    });
+  }
+
+  if (calEventForm) {
+    calEventForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const title = calEventTitle.value.trim();
+      const time = calEventTime.value.trim();
+      if (!title) return;
+      const key = toDateKey(calSelectedDate);
+      if (!Array.isArray(calendarEvents[key])) calendarEvents[key] = [];
+      calendarEvents[key].push({ id: `EV-${Date.now()}-${Math.floor(Math.random() * 1000)}`, title, time });
+      calEventTitle.value = '';
+      calEventTime.value = '';
+      saveState();
+      renderCalendar();
+    });
+  }
+
+  if (calSelectedItems) {
+    calSelectedItems.addEventListener('click', (e) => {
+      const delBtn = e.target.closest('[data-del-cal-ev]');
+      if (!delBtn) return;
+      const key = toDateKey(calSelectedDate);
+      if (!Array.isArray(calendarEvents[key])) return;
+      calendarEvents[key] = calendarEvents[key].filter((ev) => ev.id !== delBtn.dataset.delCalEv);
+      if (calendarEvents[key].length === 0) delete calendarEvents[key];
+      saveState();
+      renderCalendar();
+    });
+  }
+
   function switchView(viewMode) {
     for (const tab of viewTabs) {
       const isSelected = tab.dataset.view === viewMode;
@@ -1872,6 +2163,7 @@
     }
     panelRegister.hidden = !(viewMode === 'register' || viewMode === 'both');
     panelTimetable.hidden = !(viewMode === 'timetable' || viewMode === 'both');
+    if (panelCalendar) panelCalendar.hidden = !(viewMode === 'calendar' || viewMode === 'both');
     if (panelTuition) panelTuition.hidden = !(viewMode === 'tuition' || viewMode === 'both');
     if (panelExcel) panelExcel.hidden = !(viewMode === 'excel' || viewMode === 'both');
   }
@@ -2203,6 +2495,8 @@
         catalog = Array.isArray(saved.catalog) ? saved.catalog : [];
         registered = Array.isArray(saved.registered) ? saved.registered : [];
         customTuitionItems = Array.isArray(saved.customTuitionItems) ? saved.customTuitionItems : [];
+        calendarEvents =
+          saved.calendarEvents && typeof saved.calendarEvents === 'object' ? saved.calendarEvents : {};
         tuitionSelections =
           saved.tuitionSelections && typeof saved.tuitionSelections === 'object' ? saved.tuitionSelections : {};
         if (tuitionRateLtInput && saved.rateLt !== undefined) tuitionRateLtInput.value = saved.rateLt;
@@ -2224,12 +2518,14 @@
     catalog = [];
     registered = [];
     customTuitionItems = [];
+    calendarEvents = {};
     tuitionSelections = {};
     try {
       localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
       localStorage.removeItem(STORAGE_KEYS.CATALOG);
       localStorage.removeItem(STORAGE_KEYS.REGISTERED);
       localStorage.removeItem(STORAGE_KEYS.CUSTOM_TUITION);
+      localStorage.removeItem(STORAGE_KEYS.CALENDAR_EVENTS);
       localStorage.removeItem(STORAGE_KEYS.TUITION_SELECTIONS);
     } catch {
       // Ignore
@@ -2305,6 +2601,7 @@
         catalog,
         registered,
         customTuitionItems,
+        calendarEvents,
         tuitionSelections,
         rateLt: tuitionRateLtInput?.value || '750000',
         rateTh: tuitionRateInput?.value || '850000',
@@ -2339,6 +2636,7 @@
         catalog = Array.isArray(d.catalog) ? d.catalog : [];
         registered = Array.isArray(d.registered) ? d.registered : [];
         customTuitionItems = Array.isArray(d.customTuitionItems) ? d.customTuitionItems : [];
+        calendarEvents = d.calendarEvents && typeof d.calendarEvents === 'object' ? d.calendarEvents : {};
         tuitionSelections = d.tuitionSelections && typeof d.tuitionSelections === 'object' ? d.tuitionSelections : {};
         if (tuitionRateLtInput && d.rateLt !== undefined) tuitionRateLtInput.value = d.rateLt;
         if (tuitionRateInput && d.rateTh !== undefined) tuitionRateInput.value = d.rateTh;

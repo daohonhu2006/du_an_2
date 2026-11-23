@@ -55,6 +55,9 @@
       <button type="button" role="tab" id="tab-timetable" class="view-tab" aria-selected="false" data-view="timetable">
         Xem Thời khóa biểu (<span id="tab-reg-count">0</span>)
       </button>
+      <button type="button" role="tab" id="tab-calendar" class="view-tab" aria-selected="false" data-view="calendar">
+        Lịch tháng
+      </button>
       <button type="button" role="tab" id="tab-tuition" class="view-tab" aria-selected="false" data-view="tuition">
         Tính học phí
       </button>
@@ -255,6 +258,40 @@
             </thead>
             <tbody id="tuition-tbody"></tbody>
           </table>
+        </div>
+      </section>
+    </div>
+
+    <!-- Panel 3b: Monthly / Weekly / Daily Calendar -->
+    <div id="panel-calendar" role="tabpanel" aria-labelledby="tab-calendar" hidden>
+      <section class="card calendar-section" aria-labelledby="calendar-heading">
+        <div class="calendar-topbar">
+          <div class="calendar-nav">
+            <button type="button" id="cal-prev-btn" class="btn btn-sm btn-ghost" aria-label="Tháng trước">&lsaquo;</button>
+            <h2 id="calendar-heading" class="calendar-month-title">tháng 11, 2026</h2>
+            <button type="button" id="cal-next-btn" class="btn btn-sm btn-ghost" aria-label="Tháng sau">&rsaquo;</button>
+            <button type="button" id="cal-today-btn" class="btn btn-sm btn-outline">Hôm nay</button>
+          </div>
+          <div class="cal-mode-switch" role="group" aria-label="Chế độ xem lịch">
+            <button type="button" class="cal-mode-btn" data-cal-mode="day" aria-pressed="false">Ngày</button>
+            <button type="button" class="cal-mode-btn" data-cal-mode="week" aria-pressed="false">Tuần</button>
+            <button type="button" class="cal-mode-btn" data-cal-mode="month" aria-pressed="true">Tháng</button>
+          </div>
+        </div>
+
+        <div class="calendar-layout">
+          <div id="cal-grid-container" class="cal-grid-card"></div>
+          <aside class="cal-detail-card" aria-label="Chi tiết ngày đã chọn">
+            <h3 id="cal-selected-title" class="cal-detail-title">Chi tiết ngày</h3>
+            <form id="cal-event-form" class="cal-event-form">
+              <input type="text" id="cal-event-title" class="input" required placeholder="Thêm nhắc nhở / lịch thi / nộp bài..." aria-label="Nội dung nhắc nhở">
+              <div class="cal-event-subrow">
+                <input type="text" id="cal-event-time" class="input" placeholder="Giờ (VD: 09h30)" aria-label="Giờ nhắc nhở">
+                <button type="submit" class="btn btn-sm btn-primary">+ Thêm lịch</button>
+              </div>
+            </form>
+            <div id="cal-selected-items" class="cal-selected-items"></div>
+          </aside>
         </div>
       </section>
     </div>
