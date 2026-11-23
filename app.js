@@ -726,6 +726,7 @@
       if (filterMode === 'elearning') {
         const allText = [
           sec.ghiChu || '',
+          sec.tinhChat || '',
           sec.tenHP || '',
           sec.lopHoc || '',
           ...secSessions.flatMap((i) => [i.sess.phong || '', i.sess.gv || '']),
@@ -1291,9 +1292,9 @@
       const lopHoc = colIdx.lopHoc !== -1 ? String(row[colIdx.lopHoc] || '').trim() : '';
       const gv = colIdx.giangVien !== -1 ? String(row[colIdx.giangVien] || '').trim() : '';
       let ghiChu = colIdx.ghiChu !== -1 ? String(row[colIdx.ghiChu] || '').trim() : '';
-      if (!ghiChu) {
-        const elenCell = row.find((cell) => /e[_\s-]?learn|elen|huitx/i.test(String(cell || '')));
-        if (elenCell) ghiChu = String(elenCell).trim();
+      const elenCell = row.find((cell) => /e[_\s-]?learn|elen|huitx/i.test(String(cell || '')));
+      if (elenCell && !/e[_\s-]?learn|elen|huitx/i.test(ghiChu)) {
+        ghiChu = ghiChu ? `${ghiChu} • ${String(elenCell).trim()}` : String(elenCell).trim();
       }
       const soTC = colIdx.soTC !== -1 ? Number(row[colIdx.soTC]) || 3 : 3;
 
@@ -1320,10 +1321,11 @@
 
       let sec = grouped.get(maLHP);
       if (!sec) {
-        sec = { maHP, tenHP, maLHP, lopHoc, ghiChu, soTC, ltList: [], thList: [] };
+        sec = { maHP, tenHP, maLHP, lopHoc, tinhChat, ghiChu, soTC, ltList: [], thList: [] };
         grouped.set(maLHP, sec);
       } else {
         if (!sec.lopHoc && lopHoc) sec.lopHoc = lopHoc;
+        if (!sec.tinhChat && tinhChat) sec.tinhChat = tinhChat;
         if (!sec.ghiChu && ghiChu) sec.ghiChu = ghiChu;
       }
 
