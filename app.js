@@ -723,7 +723,15 @@
       if (filterMode === 'valid') return isRegistered || !evalRes.hasConflict;
       if (filterMode === 'conflict') return !isRegistered && evalRes.hasConflict;
       if (filterMode === 'registered') return isRegistered;
-      if (filterMode === 'elearning') return Boolean(sec.ghiChu && /e[_-]?learning|huitx/i.test(sec.ghiChu));
+      if (filterMode === 'elearning') {
+        const allText = [
+          sec.ghiChu || '',
+          sec.tenHP || '',
+          sec.lopHoc || '',
+          ...secSessions.flatMap((i) => [i.sess.phong || '', i.sess.gv || '']),
+        ].join(' ');
+        return /e[_\s-]?learn|elen|huitx/i.test(allText);
+      }
       return true;
     };
 
@@ -1282,7 +1290,11 @@
       const tinhChat = colIdx.tinhChat !== -1 ? String(row[colIdx.tinhChat] || '').trim() : '';
       const lopHoc = colIdx.lopHoc !== -1 ? String(row[colIdx.lopHoc] || '').trim() : '';
       const gv = colIdx.giangVien !== -1 ? String(row[colIdx.giangVien] || '').trim() : '';
-      const ghiChu = colIdx.ghiChu !== -1 ? String(row[colIdx.ghiChu] || '').trim() : '';
+      let ghiChu = colIdx.ghiChu !== -1 ? String(row[colIdx.ghiChu] || '').trim() : '';
+      if (!ghiChu) {
+        const elenCell = row.find((cell) => /e[_\s-]?learn|elen|huitx/i.test(String(cell || '')));
+        if (elenCell) ghiChu = String(elenCell).trim();
+      }
       const soTC = colIdx.soTC !== -1 ? Number(row[colIdx.soTC]) || 3 : 3;
 
       // Xác định tuần học từ các cột T... nếu có đánh dấu, ngược lại dùng 1-15
