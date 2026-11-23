@@ -859,10 +859,12 @@
         const secSess = getSectionSessions(sec);
         const schedLines = [
           ...secSess.ltList.map(
-            (lt) => `<div><span class="badge badge-lt">LT</span> ${escapeHtml(formatScheduleText(lt, 'LT'))} • ${escapeHtml(lt.phong || '—')}</div>`
+            (lt) =>
+              `<div><span class="badge badge-lt">LT</span> ${escapeHtml(formatScheduleText(lt, 'LT'))} • ${escapeHtml(lt.phong || '—')}${lt.gv ? ` • GV: ${escapeHtml(lt.gv)}` : ''}</div>`
           ),
           ...secSess.thList.map(
-            (th) => `<div><span class="badge badge-th">TH</span> ${escapeHtml(formatScheduleText(th, 'TH'))} • ${escapeHtml(th.phong || '—')}</div>`
+            (th) =>
+              `<div><span class="badge badge-th">TH</span> ${escapeHtml(formatScheduleText(th, 'TH'))} • ${escapeHtml(th.phong || '—')}${th.gv ? ` • GV: ${escapeHtml(th.gv)}` : ''}</div>`
           ),
         ].join('');
 
@@ -940,6 +942,7 @@
                 <div class="tt-slot-title">[${slot.label}] ${escapeHtml(slot.sec.tenHP)}</div>
                 <div class="tt-slot-meta">${escapeHtml(getSessionClockRange(slot.sess, slot.label))}</div>
                 <div class="tt-slot-meta">${escapeHtml(slot.sec.maLHP)} • ${escapeHtml(slot.sess.phong || '—')}</div>
+                ${slot.sess.gv ? `<div class="tt-slot-meta">GV: ${escapeHtml(slot.sess.gv)}</div>` : ''}
                 <div class="tt-slot-meta">Tuần: ${escapeHtml(formatWeekSummary(slot.sess.tuan || '1-15'))}</div>
               </div>
             </td>
