@@ -288,6 +288,24 @@
           <label for="excel-file-input" class="btn btn-primary file-label">Chọn file Excel (.xlsx / .xls / .csv)</label>
         </div>
       </section>
+
+      <section class="card" style="margin-top: 1.25rem;" aria-labelledby="backup-section-title">
+        <div class="excel-bar-header">
+          <div>
+            <h2 id="backup-section-title">Đồng Bộ &amp; Sao Lưu Sang Điện Thoại / Máy Tính Khác (.json)</h2>
+            <p class="muted">Xuất toàn bộ tài khoản, danh sách học phần, các môn đã đăng ký và học phí thành 1 file <code>.json</code> để gửi qua Zalo/Drive rồi mở lại trên thiết bị khác.</p>
+          </div>
+          <div class="excel-actions">
+            <button type="button" id="btn-export-backup" class="btn btn-outline">
+              Xuất file sao lưu (.json)
+            </button>
+            <label for="backup-file-input" class="btn btn-primary file-label">
+              Nhập file sao lưu (.json)
+              <input type="file" id="backup-file-input" accept=".json,application/json" hidden>
+            </label>
+          </div>
+        </div>
+      </section>
     </div>
   </main>
 

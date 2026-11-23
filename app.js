@@ -2227,6 +2227,98 @@
     });
   }
 
+  // --- Sao lưu & Khôi phục dữ liệu (.json) để chuyển giữa Điện thoại & Máy tính ---
+  function exportBackupJson() {
+    const users = getUsersMap();
+    const userRecord = currentUser && users[currentUser] ? users[currentUser] : null;
+    const payload = {
+      app: 'HUIT_DKHP',
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      account: userRecord,
+      data: {
+        catalog,
+        registered,
+        tuitionSelections,
+        rateLt: tuitionRateLtInput?.value || '750000',
+        rateTh: tuitionRateInput?.value || '850000',
+        theme: themeSelect?.value || 'system',
+      },
+    };
+
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const fileSuffix = userRecord ? `_${userRecord.username}` : '';
+    a.download = `HUIT_SaoLuu${fileSuffix}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    showImportStatus(`Đã xuất file sao lưu "${a.download}". Bạn có thể gửi file này sang điện thoại/máy tính khác để khôi phục.`, 'success');
+  }
+
+  function importBackupJson(file) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const parsed = JSON.parse(String(e.target.result || ''));
+        if (!parsed || parsed.app !== 'HUIT_DKHP' || !parsed.data) {
+          showImportStatus('File sao lưu không hợp lệ hoặc không đúng định dạng HUIT.', 'error');
+          return;
+        }
+
+        const d = parsed.data;
+        catalog = Array.isArray(d.catalog) ? d.catalog : [];
+        registered = Array.isArray(d.registered) ? d.registered : [];
+        tuitionSelections = d.tuitionSelections && typeof d.tuitionSelections === 'object' ? d.tuitionSelections : {};
+        if (tuitionRateLtInput && d.rateLt !== undefined) tuitionRateLtInput.value = d.rateLt;
+        if (tuitionRateInput && d.rateTh !== undefined) tuitionRateInput.value = d.rateTh;
+        if (themeSelect && d.theme) {
+          themeSelect.value = d.theme;
+          applyTheme(d.theme);
+        }
+
+        if (parsed.account && parsed.account.username) {
+          const users = getUsersMap();
+          users[parsed.account.username] = parsed.account;
+          saveUsersMap(users);
+          currentUser = parsed.account.username;
+          try {
+            localStorage.setItem(STORAGE_KEYS.CURRENT_USER, currentUser);
+          } catch {
+            // Ignore
+          }
+        }
+
+        saveState();
+        renderAccountBar();
+        renderAll();
+        showImportStatus(
+          `Đã khôi phục thành công ${catalog.length} lớp học phần và ${registered.length} môn đã đăng ký từ "${file.name}".`,
+          'success'
+        );
+      } catch (err) {
+        showImportStatus(`Lỗi đọc file sao lưu: ${err.message}`, 'error');
+      }
+    };
+    reader.readAsText(file, 'utf-8');
+  }
+
+  const btnExportBackup = document.getElementById('btn-export-backup');
+  const backupFileInput = document.getElementById('backup-file-input');
+  if (btnExportBackup) btnExportBackup.addEventListener('click', exportBackupJson);
+  if (backupFileInput) {
+    backupFileInput.addEventListener('change', (e) => {
+      const file = e.target.files?.[0];
+      if (file) {
+        importBackupJson(file);
+        e.target.value = '';
+      }
+    });
+  }
+
   // Khôi phục phiên đăng nhập nếu đã đăng nhập trước đó
   if (currentUser && getUsersMap()[currentUser]) {
     applyAccountSession(currentUser, false);
