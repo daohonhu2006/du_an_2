@@ -1963,6 +1963,41 @@
     return jsDay === 0 ? 8 : jsDay + 1;
   }
 
+  function getEarliestRegisteredStartDate() {
+    let earliest = '';
+    for (const sec of registered) {
+      for (const item of getSectionSessions(sec).all) {
+        if (item.sess.batDau && (!earliest || item.sess.batDau < earliest)) {
+          earliest = item.sess.batDau;
+        }
+      }
+    }
+    if (!earliest) return null;
+    const [y, m, d] = earliest.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  }
+
+  function isSessionActiveOnDate(sess, d, dateKey) {
+    if (sess.batDau && dateKey < sess.batDau) return false;
+    if (sess.ketThuc && dateKey > sess.ketThuc) return false;
+
+    // Nếu có ngày bắt đầu và danh sách tuần cụ thể (không phải mặc định '1-15'), đối chiếu đúng tuần học
+    if (sess.batDau && sess.tuan && sess.tuan !== '1-15') {
+      const weekSet = parseWeekSet(sess.tuan);
+      if (weekSet.size > 0) {
+        const minWeek = Math.min(...weekSet);
+        const [sy, sm, sd] = sess.batDau.split('-').map(Number);
+        const startMs = Date.UTC(sy, sm - 1, sd);
+        const curMs = Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+        const diffDays = Math.round((curMs - startMs) / 86400000);
+        if (diffDays < 0) return false;
+        const weekOffset = Math.floor(diffDays / 7);
+        if (!weekSet.has(minWeek + weekOffset)) return false;
+      }
+    }
+    return true;
+  }
+
   function getRegisteredClassesForDate(d) {
     const thu = jsDayToHuitThu(d.getDay());
     const dateKey = toDateKey(d);
@@ -1971,8 +2006,7 @@
       const secSess = getSectionSessions(sec);
       for (const item of secSess.all) {
         if (Number(item.sess.thu) !== thu) continue;
-        if (item.sess.batDau && dateKey < item.sess.batDau) continue;
-        if (item.sess.ketThuc && dateKey > item.sess.ketThuc) continue;
+        if (!isSessionActiveOnDate(item.sess, d, dateKey)) continue;
         list.push({
           kind: item.code.toLowerCase(),
           label: item.code,
@@ -2160,12 +2194,28 @@
     });
   }
 
+  const calStartBtn = document.getElementById('cal-start-btn');
+  let calUserNavigated = false;
+
   if (calTodayBtn) {
     calTodayBtn.addEventListener('click', () => {
+      calUserNavigated = true;
       const now = new Date();
       calSelectedDate = now;
       calViewYear = now.getFullYear();
       calViewMonth = now.getMonth();
+      renderCalendar();
+    });
+  }
+
+  if (calStartBtn) {
+    calStartBtn.addEventListener('click', () => {
+      const earliest = getEarliestRegisteredStartDate();
+      if (!earliest) return;
+      calUserNavigated = true;
+      calSelectedDate = earliest;
+      calViewYear = earliest.getFullYear();
+      calViewMonth = earliest.getMonth();
       renderCalendar();
     });
   }
@@ -2231,7 +2281,19 @@
     }
     panelRegister.hidden = !(viewMode === 'register' || viewMode === 'both');
     panelTimetable.hidden = !(viewMode === 'timetable' || viewMode === 'both');
-    if (panelCalendar) panelCalendar.hidden = !(viewMode === 'calendar' || viewMode === 'both');
+    if (panelCalendar) {
+      const showCal = viewMode === 'calendar' || viewMode === 'both';
+      panelCalendar.hidden = !showCal;
+      if (showCal && !calUserNavigated) {
+        const earliest = getEarliestRegisteredStartDate();
+        if (earliest) {
+          calSelectedDate = earliest;
+          calViewYear = earliest.getFullYear();
+          calViewMonth = earliest.getMonth();
+          renderCalendar();
+        }
+      }
+    }
     if (panelTuition) panelTuition.hidden = !(viewMode === 'tuition' || viewMode === 'both');
     if (panelExcel) panelExcel.hidden = !(viewMode === 'excel' || viewMode === 'both');
   }
