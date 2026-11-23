@@ -1342,8 +1342,14 @@
         colIdx.ghiChu === -1
       ) {
         colIdx.ghiChu = c;
-      } else if (h1.includes('thoigianhoc') && /^t\d*$/.test(h2) && colIdx.ketThuc === -1) {
-        colIdx.weekCols.push({ col: c, label: String(row2[c] || '').trim() });
+      } else if (
+        colIdx.batDau !== -1 &&
+        colIdx.ketThuc === -1 &&
+        (/^t0*\d+$/.test(key) || (h1.includes('thoigianhoc') && /^\d+$/.test(h2)))
+      ) {
+        const numMatch = key.match(/\d+/);
+        const weekLabel = numMatch ? `T${Number(numMatch[0])}` : `T${colIdx.weekCols.length + 1}`;
+        colIdx.weekCols.push({ col: c, label: weekLabel });
       }
     }
 
