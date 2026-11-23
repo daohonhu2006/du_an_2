@@ -404,9 +404,62 @@
     return false;
   }
 
+  function parseExcelDate(val) {
+    if (val === undefined || val === null) return null;
+    const raw = String(val).trim();
+    if (!raw) return null;
+
+    // dd/mm/yyyy hoặc d/m/yyyy hoặc dd-mm-yyyy
+    const dmy = raw.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+    if (dmy) {
+      const day = Number(dmy[1]);
+      const month = Number(dmy[2]);
+      const year = dmy[3].length === 2 ? 2000 + Number(dmy[3]) : Number(dmy[3]);
+      if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+        const iso = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        const display = `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year}`;
+        return { iso, display };
+      }
+    }
+
+    // yyyy-mm-dd
+    const ymd = raw.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+    if (ymd) {
+      const year = Number(ymd[1]);
+      const month = Number(ymd[2]);
+      const day = Number(ymd[3]);
+      const iso = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      const display = `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year}`;
+      return { iso, display };
+    }
+
+    // Excel serial date
+    if (/^\d{4,5}$/.test(raw)) {
+      const serial = Number(raw);
+      if (serial > 20000 && serial < 70000) {
+        const utc = new Date(Date.UTC(1899, 11, 30) + serial * 86400000);
+        const year = utc.getUTCFullYear();
+        const month = utc.getUTCMonth() + 1;
+        const day = utc.getUTCDate();
+        return {
+          iso: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+          display: `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year}`,
+        };
+      }
+    }
+    return null;
+  }
+
+  function dateRangesOverlap(a, b) {
+    if (a.batDau && b.ketThuc && a.batDau > b.ketThuc) return false;
+    if (b.batDau && a.ketThuc && b.batDau > a.ketThuc) return false;
+    return true;
+  }
+
   function sessionsOverlap(a, b, typeA = 'LT', typeB = 'LT') {
     if (!a || !b) return false;
     if (Number(a.thu) !== Number(b.thu)) return false;
+    if (!dateRangesOverlap(a, b)) return false;
     if (!weeksOverlap(a.tuan, b.tuan)) return false;
 
     const periodOverlap = a.start <= b.end && b.start <= a.end;
@@ -636,15 +689,21 @@
     const list = Array.isArray(sessOrList) ? sessOrList : sessOrList ? [sessOrList] : [];
     if (list.length === 0) return '<span class="muted">—</span>';
     return list
-      .map(
-        (sess) => `
+      .map((sess) => {
+        const dateNote = sess.batDauText
+          ? sess.ketThucText
+            ? `${sess.batDauText} – ${sess.ketThucText}`
+            : `Bắt đầu: ${sess.batDauText}`
+          : '';
+        return `
       <div class="sched-block" style="margin-bottom:0.35rem;">
         <div><span class="badge ${badgeClass}">${badgeLabel}</span> <strong>${escapeHtml(formatScheduleText(sess, badgeLabel))}</strong></div>
         <div class="sched-meta">Phòng: ${escapeHtml(sess.phong || '—')} • Tuần: ${escapeHtml(formatWeekSummary(sess.tuan || '1-15'))}</div>
+        ${dateNote ? `<div class="sched-meta">Thời gian: ${escapeHtml(dateNote)}</div>` : ''}
         <div class="sched-meta">GV: ${escapeHtml(sess.gv || '—')}</div>
       </div>
-    `
-      )
+    `;
+      })
       .join('');
   }
 
@@ -1365,6 +1424,9 @@
         if (!sec.ghiChu && ghiChu) sec.ghiChu = ghiChu;
       }
 
+      const batDauParsed = colIdx.batDau !== -1 ? parseExcelDate(row[colIdx.batDau]) : null;
+      const ketThucParsed = colIdx.ketThuc !== -1 ? parseExcelDate(row[colIdx.ketThuc]) : null;
+
       const sessObj = {
         thu,
         start: Math.max(1, Math.min(16, Math.min(startTiet, endTiet))),
@@ -1372,6 +1434,10 @@
         phong,
         gv,
         tuan,
+        batDau: batDauParsed ? batDauParsed.iso : '',
+        batDauText: batDauParsed ? batDauParsed.display : '',
+        ketThuc: ketThucParsed ? ketThucParsed.iso : '',
+        ketThucText: ketThucParsed ? ketThucParsed.display : '',
       };
 
       const kind = classifyRowScheduleType(tinhChat, phong, sec, sessObj);
@@ -1899,21 +1965,23 @@
 
   function getRegisteredClassesForDate(d) {
     const thu = jsDayToHuitThu(d.getDay());
+    const dateKey = toDateKey(d);
     const list = [];
     for (const sec of registered) {
       const secSess = getSectionSessions(sec);
       for (const item of secSess.all) {
-        if (Number(item.sess.thu) === thu) {
-          list.push({
-            kind: item.code.toLowerCase(),
-            label: item.code,
-            tenHP: sec.tenHP,
-            maLHP: sec.maLHP,
-            clock: getSessionClockRange(item.sess, item.code),
-            phong: item.sess.phong,
-            gv: item.sess.gv,
-          });
-        }
+        if (Number(item.sess.thu) !== thu) continue;
+        if (item.sess.batDau && dateKey < item.sess.batDau) continue;
+        if (item.sess.ketThuc && dateKey > item.sess.ketThuc) continue;
+        list.push({
+          kind: item.code.toLowerCase(),
+          label: item.code,
+          tenHP: sec.tenHP,
+          maLHP: sec.maLHP,
+          clock: getSessionClockRange(item.sess, item.code),
+          phong: item.sess.phong,
+          gv: item.sess.gv,
+        });
       }
     }
     return list;
