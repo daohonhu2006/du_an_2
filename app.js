@@ -206,6 +206,7 @@
     for (const s of catalog) {
       add('Môn học', s.tenHP);
       if (s.lopHoc) add('Lớp', s.lopHoc);
+      if (s.ghiChu) add('Hình thức', s.ghiChu);
       add('Mã LHP', s.maLHP);
       for (const item of getSectionSessions(s).all) {
         if (item.sess.gv) add('Giảng viên', item.sess.gv);
@@ -722,6 +723,7 @@
       if (filterMode === 'valid') return isRegistered || !evalRes.hasConflict;
       if (filterMode === 'conflict') return !isRegistered && evalRes.hasConflict;
       if (filterMode === 'registered') return isRegistered;
+      if (filterMode === 'elearning') return Boolean(sec.ghiChu && /e[_-]?learning|huitx/i.test(sec.ghiChu));
       return true;
     };
 
@@ -738,6 +740,7 @@
             sec.tenHP,
             sec.maLHP,
             sec.lopHoc || '',
+            sec.ghiChu || '',
             ...secSessions.flatMap((i) => [i.sess.gv || '', i.sess.phong || '']),
           ].join(' ')
         );
@@ -825,6 +828,7 @@
             <td>
               <div class="course-name">${escapeHtml(sec.tenHP)}</div>
               ${subMeta ? `<div class="course-code">${subMeta}</div>` : ''}
+              ${sec.ghiChu ? `<div><span class="badge badge-elearning">${escapeHtml(sec.ghiChu)}</span></div>` : ''}
             </td>
             <td><code>${escapeHtml(sec.maLHP)}</code></td>
             <td><strong>${escapeHtml(sec.soTC)}</strong></td>
@@ -1207,6 +1211,7 @@
       batDau: -1,
       ketThuc: -1,
       giangVien: -1,
+      ghiChu: -1,
       weekCols: [],
     };
 
@@ -1228,8 +1233,26 @@
       else if (key === 'batdau' && colIdx.batDau === -1) colIdx.batDau = c;
       else if (key === 'ketthuc' && colIdx.ketThuc === -1) colIdx.ketThuc = c;
       else if ((key === 'giangvien' || key === 'gv') && colIdx.giangVien === -1) colIdx.giangVien = c;
-      else if (h1.includes('thoigianhoc') && /^t\d*$/.test(h2) && colIdx.ketThuc === -1) {
+      else if (
+        (key === 'ghichu' || key === 'hinhthuc' || key === 'hinhthuchoc' || key === 'elearning' || key === 'huitx' || key === 'note') &&
+        colIdx.ghiChu === -1
+      ) {
+        colIdx.ghiChu = c;
+      } else if (h1.includes('thoigianhoc') && /^t\d*$/.test(h2) && colIdx.ketThuc === -1) {
         colIdx.weekCols.push({ col: c, label: String(row2[c] || '').trim() });
+      }
+    }
+
+    // Nếu cột cuối cùng (sau Giảng viên) không có tiêu đề nhưng chứa dữ liệu như E_learning(HUITx)
+    if (colIdx.ghiChu === -1 && colIdx.giangVien !== -1) {
+      for (let c = colIdx.giangVien + 1; c < colCount + 3; c++) {
+        const hasNoteData = matrix
+          .slice(dataStartIdx, Math.min(matrix.length, dataStartIdx + 80))
+          .some((r) => r && String(r[c] || '').trim() !== '');
+        if (hasNoteData) {
+          colIdx.ghiChu = c;
+          break;
+        }
       }
     }
 
@@ -1259,6 +1282,7 @@
       const tinhChat = colIdx.tinhChat !== -1 ? String(row[colIdx.tinhChat] || '').trim() : '';
       const lopHoc = colIdx.lopHoc !== -1 ? String(row[colIdx.lopHoc] || '').trim() : '';
       const gv = colIdx.giangVien !== -1 ? String(row[colIdx.giangVien] || '').trim() : '';
+      const ghiChu = colIdx.ghiChu !== -1 ? String(row[colIdx.ghiChu] || '').trim() : '';
       const soTC = colIdx.soTC !== -1 ? Number(row[colIdx.soTC]) || 3 : 3;
 
       // Xác định tuần học từ các cột T... nếu có đánh dấu, ngược lại dùng 1-15
@@ -1284,10 +1308,11 @@
 
       let sec = grouped.get(maLHP);
       if (!sec) {
-        sec = { maHP, tenHP, maLHP, lopHoc, soTC, ltList: [], thList: [] };
+        sec = { maHP, tenHP, maLHP, lopHoc, ghiChu, soTC, ltList: [], thList: [] };
         grouped.set(maLHP, sec);
-      } else if (!sec.lopHoc && lopHoc) {
-        sec.lopHoc = lopHoc;
+      } else {
+        if (!sec.lopHoc && lopHoc) sec.lopHoc = lopHoc;
+        if (!sec.ghiChu && ghiChu) sec.ghiChu = ghiChu;
       }
 
       const sessObj = {
