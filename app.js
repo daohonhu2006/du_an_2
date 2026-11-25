@@ -12,6 +12,8 @@
     CALENDAR_EVENTS: 'huit_dkhp_calendar_events_v1',
     USERS: 'huit_dkhp_users_v1',
     CURRENT_USER: 'huit_dkhp_current_user_v1',
+    FIREBASE_CONFIG: 'huit_dkhp_firebase_config_v1',
+    GEMINI_KEY: 'huit_dkhp_gemini_key_v1',
   };
 
   // State (khởi tạo trống, người dùng tự tải lên file Excel TKB của mình)
@@ -55,6 +57,7 @@
   const panelTimetable = document.getElementById('panel-timetable');
   const panelCalendar = document.getElementById('panel-calendar');
   const panelTuition = document.getElementById('panel-tuition');
+  const panelAi = document.getElementById('panel-ai');
   const panelExcel = document.getElementById('panel-excel');
 
   const tuitionRateLtInput = document.getElementById('tuition-rate-lt');
@@ -115,6 +118,7 @@
           theme: themeSelect?.value || 'system',
         };
         localStorage.setItem(getUserDataKey(currentUser), JSON.stringify(userPayload));
+        if (typeof pushCloudData === 'function') pushCloudData(userPayload);
       }
     } catch {
       // Ignore storage quota errors
@@ -1245,6 +1249,7 @@
     renderTimetable();
     renderCalendar();
     renderTuition();
+    if (typeof renderAiChecklist === 'function') renderAiChecklist();
   }
 
   // --- Excel Helpers ---
@@ -1557,6 +1562,32 @@
     }
   }
 
+  function applyCatalogImport(newSections, fileName, errors) {
+    const modeInput = document.querySelector('input[name="excel-import-mode"]:checked');
+    const importMode = modeInput ? modeInput.value : 'replace';
+
+    if (importMode === 'update' && catalog.length > 0) {
+      const mergedMap = new Map(catalog.map((s) => [s.maLHP, s]));
+      for (const sec of newSections) {
+        mergedMap.set(sec.maLHP, sec);
+      }
+      catalog = Array.from(mergedMap.values());
+    } else {
+      catalog = newSections;
+    }
+
+    syncRegisteredWithCatalog();
+    saveState();
+    renderAll();
+
+    const warnText = errors.length > 0 ? ` (Bỏ qua ${errors.length} dòng lỗi: ${errors[0]})` : '';
+    const modeLabel = importMode === 'update' ? 'Đã cập nhật/gộp' : 'Đã nhận';
+    showImportStatus(
+      `${modeLabel} ${newSections.length} lớp học phần (tổng ${catalog.length} lớp) từ "${fileName}".${warnText}`,
+      'success'
+    );
+  }
+
   function importExcelFile(file) {
     if (typeof XLSX === 'undefined') {
       showImportStatus('Không tải được thư viện đọc Excel (SheetJS). Vui lòng kiểm tra kết nối mạng.', 'error');
@@ -1574,19 +1605,7 @@
         const matrix = expandSheetMergesToMatrix(firstSheet);
         const huitResult = parseHuitMatrix(matrix, firstSheet);
         if (huitResult && huitResult.sections.length > 0) {
-          catalog = huitResult.sections;
-          syncRegisteredWithCatalog();
-          saveState();
-          renderAll();
-
-          const warnText =
-            huitResult.errors.length > 0
-              ? ` (Bỏ qua ${huitResult.errors.length} dòng không đủ lịch: ${huitResult.errors[0]})`
-              : '';
-          showImportStatus(
-            `Đã nhận ${huitResult.sections.length} lớp học phần theo chuẩn HUIT từ "${file.name}".${warnText}`,
-            'success'
-          );
+          applyCatalogImport(huitResult.sections, file.name, huitResult.errors);
           return;
         }
 
@@ -1657,13 +1676,7 @@
           return;
         }
 
-        catalog = parsedSections;
-        syncRegisteredWithCatalog();
-        saveState();
-        renderAll();
-
-        const warnText = errors.length > 0 ? ` (Bỏ qua ${errors.length} dòng lỗi: ${errors[0]})` : '';
-        showImportStatus(`Đã nhận ${parsedSections.length} lớp học phần từ file "${file.name}".${warnText}`, 'success');
+        applyCatalogImport(parsedSections, file.name, errors);
       } catch (err) {
         showImportStatus(`Lỗi đọc file Excel: ${err.message}`, 'error');
       }
@@ -2399,6 +2412,7 @@
       }
     }
     if (panelTuition) panelTuition.hidden = !(viewMode === 'tuition' || viewMode === 'both');
+    if (panelAi) panelAi.hidden = !(viewMode === 'ai' || viewMode === 'both');
     if (panelExcel) panelExcel.hidden = !(viewMode === 'excel' || viewMode === 'both');
   }
 
@@ -2655,7 +2669,291 @@
     }
   });
 
-  // --- Account / Auth System (giữ dữ liệu theo tài khoản khi thoát trang) ---
+  // --- AI Schedule Analyzer & Optional Gemini AI ---
+  const aiSubjectSearch = document.getElementById('ai-subject-search');
+  const aiSubjectChecklist = document.getElementById('ai-subject-checklist');
+  const aiPrefNoEvening = document.getElementById('ai-pref-no-evening');
+  const aiPrefNoWeekend = document.getElementById('ai-pref-no-weekend');
+  const aiPrefElearning = document.getElementById('ai-pref-elearning');
+  const aiPrefCompactDays = document.getElementById('ai-pref-compact-days');
+  const aiPrefKeepReg = document.getElementById('ai-pref-keep-registered');
+  const btnAiAnalyze = document.getElementById('btn-ai-analyze');
+  const aiResultsList = document.getElementById('ai-results-list');
+  const geminiKeyInput = document.getElementById('gemini-api-key');
+  const geminiPromptInput = document.getElementById('gemini-prompt');
+  const btnGeminiAsk = document.getElementById('btn-gemini-ask');
+  const geminiResponseEl = document.getElementById('gemini-response');
+
+  const aiSelectedSubjects = new Set();
+
+  function renderAiChecklist() {
+    if (!aiSubjectChecklist) return;
+    const subjects = Array.from(new Set(catalog.map((s) => s.tenHP).filter(Boolean))).sort((a, b) =>
+      a.localeCompare(b, 'vi')
+    );
+    if (subjects.length === 0) {
+      aiSubjectChecklist.innerHTML = '<div class="muted small-note">Chưa có môn học nào. Hãy tải file Excel lên trước.</div>';
+      return;
+    }
+    const qNorm = stripDiacritics(aiSubjectSearch?.value || '');
+    const visible = qNorm ? subjects.filter((s) => stripDiacritics(s).includes(qNorm)) : subjects;
+    aiSubjectChecklist.innerHTML = visible
+      .slice(0, 120)
+      .map(
+        (sub) => `
+        <label class="ai-subject-item">
+          <input type="checkbox" value="${escapeHtml(sub)}" ${aiSelectedSubjects.has(sub) ? 'checked' : ''} data-ai-sub>
+          <span>${escapeHtml(sub)}</span>
+        </label>
+      `
+      )
+      .join('');
+  }
+
+  function scoreSectionForAi(sec, prefs) {
+    let score = 0;
+    const sessions = getSectionSessions(sec).all;
+    for (const item of sessions) {
+      if (prefs.noEvening && item.sess.end >= 13) score -= 50;
+      if (prefs.noWeekend && Number(item.sess.thu) >= 7) score -= 50;
+    }
+    if (prefs.preferElearning) {
+      const text = `${sec.ghiChu || ''} ${sec.tinhChat || ''}`;
+      if (/e[_\s-]?learn|elen|huitx/i.test(text)) score += 30;
+    }
+    return score;
+  }
+
+  function runAiScheduleOptimizer() {
+    if (!aiResultsList) return;
+    const chosen = Array.from(aiSelectedSubjects);
+    if (chosen.length === 0) {
+      aiResultsList.innerHTML = '<div class="conflict-alert-box">Bạn chưa tích chọn môn nào ở cột bên trái.</div>';
+      return;
+    }
+
+    const prefs = {
+      noEvening: Boolean(aiPrefNoEvening?.checked),
+      noWeekend: Boolean(aiPrefNoWeekend?.checked),
+      preferElearning: Boolean(aiPrefElearning?.checked),
+      compactDays: Boolean(aiPrefCompactDays?.checked),
+      keepReg: Boolean(aiPrefKeepReg?.checked),
+    };
+
+    const baseRegistered = prefs.keepReg ? registered : [];
+    const baseSubjects = new Set(baseRegistered.map((r) => r.maHP));
+
+    // Nhóm các lớp hợp lệ cho từng môn được chọn (loại bỏ lớp trùng với môn đang giữ)
+    const buckets = [];
+    for (const subName of chosen) {
+      const candidates = catalog
+        .filter((s) => s.tenHP === subName && !baseSubjects.has(s.maHP))
+        .filter((s) => {
+          const allS = getSectionSessions(s).all;
+          for (const e of baseRegistered) {
+            for (const es of getSectionSessions(e).all) {
+              for (const cs of allS) {
+                if (sessionsOverlap(cs.sess, es.sess, cs.code, es.code)) return false;
+              }
+            }
+          }
+          return true;
+        })
+        .map((s) => ({ sec: s, score: scoreSectionForAi(s, prefs) }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 12)
+        .map((x) => x.sec);
+
+      if (candidates.length === 0) {
+        aiResultsList.innerHTML = `<div class="conflict-alert-box">Môn <strong>${escapeHtml(subName)}</strong> không còn lớp nào không bị trùng với lịch đang giữ (hoặc đã được đăng ký sẵn).</div>`;
+        return;
+      }
+      buckets.push({ subName, candidates });
+    }
+
+    // Sắp xếp môn ít lựa chọn nhất lên trước để tìm kiếm quay lui siêu nhanh
+    buckets.sort((a, b) => a.candidates.length - b.candidates.length);
+
+    const solutions = [];
+    let steps = 0;
+    const MAX_STEPS = 8000;
+
+    function backtrack(idx, picked, totalScore) {
+      if (solutions.length >= 15 || steps > MAX_STEPS) return;
+      steps++;
+      if (idx === buckets.length) {
+        const daySet = new Set();
+        for (const s of [...baseRegistered, ...picked]) {
+          for (const item of getSectionSessions(s).all) daySet.add(Number(item.sess.thu));
+        }
+        const finalScore = totalScore + (prefs.compactDays ? (8 - daySet.size) * 15 : 0);
+        solutions.push({ picked: [...picked], score: finalScore, daysCount: daySet.size });
+        return;
+      }
+
+      for (const cand of buckets[idx].candidates) {
+        const candSessions = getSectionSessions(cand).all;
+        let conflict = false;
+        for (const p of picked) {
+          for (const ps of getSectionSessions(p).all) {
+            for (const cs of candSessions) {
+              if (sessionsOverlap(cs.sess, ps.sess, cs.code, ps.code)) {
+                conflict = true;
+                break;
+              }
+            }
+            if (conflict) break;
+          }
+          if (conflict) break;
+        }
+        if (!conflict) {
+          picked.push(cand);
+          backtrack(idx + 1, picked, totalScore + scoreSectionForAi(cand, prefs));
+          picked.pop();
+        }
+      }
+    }
+
+    backtrack(0, [], 0);
+
+    if (solutions.length === 0) {
+      aiResultsList.innerHTML =
+        '<div class="conflict-alert-box">Không tìm được tổ hợp nào không trùng lịch cho tất cả các môn đã chọn. Hãy bỏ bớt 1 môn hoặc bỏ bớt điều kiện lọc.</div>';
+      return;
+    }
+
+    solutions.sort((a, b) => b.score - a.score || a.daysCount - b.daysCount);
+    const topSolutions = solutions.slice(0, 3);
+    window.__lastAiCombos = topSolutions;
+
+    aiResultsList.innerHTML = topSolutions
+      .map((sol, idx) => {
+        const totalTC = sol.picked.reduce((sum, s) => sum + (Number(s.soTC) || 0), 0);
+        const rowsHtml = sol.picked
+          .map((s) => {
+            const sess = getSectionSessions(s);
+            const ltTxt = sess.ltList.map((lt) => `[LT] ${formatScheduleText(lt, 'LT')}`).join(', ');
+            const thTxt = sess.thList.map((th) => `[TH] ${formatScheduleText(th, 'TH')}`).join(', ');
+            return `<li><strong>${escapeHtml(s.tenHP)}</strong> (<code>${escapeHtml(s.maLHP)}</code>): ${escapeHtml([ltTxt, thTxt].filter(Boolean).join(' | '))}</li>`;
+          })
+          .join('');
+
+        return `
+          <div class="ai-combo-card">
+            <div class="ai-combo-header">
+              <div>
+                <strong>Phương án ${idx + 1}</strong>
+                <span class="badge badge-ok">${sol.picked.length} môn • ${totalTC} TC • Học ${sol.daysCount} ngày/tuần</span>
+              </div>
+              <button type="button" class="btn btn-sm btn-success" data-apply-ai-combo="${idx}">Đăng ký tổ hợp này</button>
+            </div>
+            <ul style="margin:0;padding-left:1.2rem;font-size:0.83rem;">${rowsHtml}</ul>
+          </div>
+        `;
+      })
+      .join('');
+  }
+
+  async function askGeminiAi() {
+    const apiKey = geminiKeyInput?.value.trim();
+    const userPrompt = geminiPromptInput?.value.trim();
+    const chosen = Array.from(aiSelectedSubjects);
+    if (!apiKey) {
+      geminiResponseEl.textContent = 'Vui lòng dán Gemini API Key (miễn phí tại aistudio.google.com) để hỏi Gemini.';
+      geminiResponseEl.hidden = false;
+      return;
+    }
+    if (chosen.length === 0) {
+      geminiResponseEl.textContent = 'Hãy tích chọn ít nhất 1 môn học bên trên trước khi hỏi Gemini.';
+      geminiResponseEl.hidden = false;
+      return;
+    }
+    try {
+      localStorage.setItem(STORAGE_KEYS.GEMINI_KEY, apiKey);
+    } catch {
+      // Ignore
+    }
+
+    const summaryLines = [];
+    for (const sub of chosen.slice(0, 8)) {
+      const secs = catalog.filter((s) => s.tenHP === sub).slice(0, 10);
+      for (const s of secs) {
+        const sess = getSectionSessions(s);
+        const desc = sess.all.map((i) => `${i.code} ${formatScheduleText(i.sess, i.code)} (${i.sess.phong})`).join('; ');
+        summaryLines.push(`- ${s.tenHP} | ${s.maLHP} | ${s.ghiChu || ''} | ${desc}`);
+      }
+    }
+
+    geminiResponseEl.textContent = 'Đang nhờ Gemini AI phân tích lịch...';
+    geminiResponseEl.hidden = false;
+
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [
+              {
+                parts: [
+                  {
+                    text: `Bạn là trợ lý đăng ký học phần HUIT. Yêu cầu của sinh viên: "${userPrompt || 'Hãy phân tích và gợi ý các lớp học phần không trùng lịch tốt nhất'}".\nDanh sách lớp:\n${summaryLines.join('\n')}\nHãy trả lời ngắn gọn, rõ ràng bằng tiếng Việt.`,
+                  },
+                ],
+              },
+            ],
+          }),
+        }
+      );
+      const data = await res.json();
+      const reply = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      geminiResponseEl.textContent = reply || data?.error?.message || 'Không nhận được phản hồi từ Gemini.';
+    } catch (err) {
+      geminiResponseEl.textContent = `Lỗi kết nối Gemini: ${err.message}`;
+    }
+  }
+
+  if (aiSubjectSearch) aiSubjectSearch.addEventListener('input', renderAiChecklist);
+  if (aiSubjectChecklist) {
+    aiSubjectChecklist.addEventListener('change', (e) => {
+      const cb = e.target.closest('[data-ai-sub]');
+      if (!cb) return;
+      if (cb.checked) aiSelectedSubjects.add(cb.value);
+      else aiSelectedSubjects.delete(cb.value);
+    });
+  }
+  if (btnAiAnalyze) btnAiAnalyze.addEventListener('click', runAiScheduleOptimizer);
+  if (btnGeminiAsk) btnGeminiAsk.addEventListener('click', askGeminiAi);
+  if (geminiKeyInput) {
+    try {
+      const savedKey = localStorage.getItem(STORAGE_KEYS.GEMINI_KEY);
+      if (savedKey) geminiKeyInput.value = savedKey;
+    } catch {
+      // Ignore
+    }
+  }
+  if (aiResultsList) {
+    aiResultsList.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-apply-ai-combo]');
+      if (!btn) return;
+      const combo = window.__lastAiCombos?.[Number(btn.dataset.applyAiCombo)];
+      if (!combo) return;
+      const keepReg = Boolean(aiPrefKeepReg?.checked);
+      if (!keepReg) registered = [];
+      for (const sec of combo.picked) {
+        if (!registered.some((r) => r.maLHP === sec.maLHP)) {
+          registered.push(structuredClone(sec));
+        }
+      }
+      saveState();
+      renderAll();
+      showImportStatus(`AI đã đăng ký nhanh ${combo.picked.length} học phần cho bạn!`, 'success');
+      switchView('timetable');
+    });
+  }
+
+  // --- Account / Auth System (hỗ trợ cả Firebase Cloud Gmail thật lẫn Lưu cục bộ) ---
   const accountBar = document.getElementById('account-bar');
   const authDialog = document.getElementById('auth-dialog');
   const authDialogTitle = document.getElementById('auth-dialog-title');
@@ -2667,6 +2965,189 @@
   const authErrorEl = document.getElementById('auth-error');
   const authSubmitBtn = document.getElementById('auth-submit-btn');
   const authModeBtns = Array.from(document.querySelectorAll('[data-auth-mode]'));
+  const btnGoogleLogin = document.getElementById('btn-google-login');
+  const authCloudStatusEl = document.getElementById('auth-cloud-status');
+  const firebaseConfigInput = document.getElementById('firebase-config-input');
+  const btnSaveFirebaseConfig = document.getElementById('btn-save-firebase-config');
+  const btnClearFirebaseConfig = document.getElementById('btn-clear-firebase-config');
+
+  let cloudUser = null;
+  let firebaseReady = false;
+  let cloudSyncTimer = null;
+
+  function parseFirebaseConfigInput(rawText) {
+    const clean = String(rawText || '').trim();
+    if (!clean) return null;
+    try {
+      return JSON.parse(clean);
+    } catch {
+      // Hỗ trợ dán trực tiếp object JS từ Firebase Console
+      const obj = {};
+      const re = /([a-zA-Z0-9_]+)\s*:\s*["']([^"']+)["']/g;
+      let m;
+      while ((m = re.exec(clean)) !== null) {
+        obj[m[1]] = m[2];
+      }
+      return obj.apiKey && obj.projectId ? obj : null;
+    }
+  }
+
+  function pushCloudData(payload) {
+    if (!firebaseReady || !cloudUser || typeof firebase === 'undefined') return;
+    clearTimeout(cloudSyncTimer);
+    cloudSyncTimer = setTimeout(() => {
+      try {
+        firebase
+          .database()
+          .ref(`users/${cloudUser.uid}`)
+          .set({ ...payload, updatedAt: Date.now() })
+          .catch(() => {});
+      } catch {
+        // Ignore
+      }
+    }, 400);
+  }
+
+  async function pullCloudData(uid) {
+    if (!firebaseReady || !uid || typeof firebase === 'undefined') return;
+    try {
+      const snap = await firebase.database().ref(`users/${uid}`).get();
+      const cloudVal = snap.val();
+      if (cloudVal && (Array.isArray(cloudVal.catalog) || Array.isArray(cloudVal.registered))) {
+        catalog = Array.isArray(cloudVal.catalog) ? cloudVal.catalog : [];
+        registered = Array.isArray(cloudVal.registered) ? cloudVal.registered : [];
+        customTuitionItems = Array.isArray(cloudVal.customTuitionItems) ? cloudVal.customTuitionItems : [];
+        calendarEvents =
+          cloudVal.calendarEvents && typeof cloudVal.calendarEvents === 'object' ? cloudVal.calendarEvents : {};
+        tuitionSelections =
+          cloudVal.tuitionSelections && typeof cloudVal.tuitionSelections === 'object'
+            ? cloudVal.tuitionSelections
+            : {};
+        if (tuitionRateLtInput && cloudVal.rateLt !== undefined) tuitionRateLtInput.value = cloudVal.rateLt;
+        if (tuitionRateInput && cloudVal.rateTh !== undefined) tuitionRateInput.value = cloudVal.rateTh;
+        if (themeSelect && cloudVal.theme) {
+          themeSelect.value = cloudVal.theme;
+          applyTheme(cloudVal.theme);
+        }
+        saveState();
+        renderAll();
+      } else if (catalog.length > 0 || registered.length > 0) {
+        // Tài khoản Cloud mới chưa có dữ liệu -> đẩy dữ liệu hiện tại lên Cloud
+        saveState();
+      }
+    } catch {
+      // Ignore network errors
+    }
+  }
+
+  function initFirebaseCloud() {
+    if (typeof firebase === 'undefined') return false;
+    let cfg = null;
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.FIREBASE_CONFIG);
+      if (raw) {
+        if (firebaseConfigInput) firebaseConfigInput.value = raw;
+        cfg = parseFirebaseConfigInput(raw);
+      }
+    } catch {
+      cfg = null;
+    }
+
+    if (!cfg || !cfg.apiKey || !cfg.databaseURL) {
+      firebaseReady = false;
+      if (authCloudStatusEl) {
+        authCloudStatusEl.textContent =
+          'Chế độ hiện tại: Lưu cục bộ trên trình duyệt. Dán cấu hình Firebase bên dưới để đăng nhập Gmail & đồng bộ Điện thoại ↔ Máy tính.';
+      }
+      return false;
+    }
+
+    try {
+      if (!firebase.apps.length) firebase.initializeApp(cfg);
+      firebaseReady = true;
+      if (authCloudStatusEl) {
+        authCloudStatusEl.textContent = 'Đã kết nối Cloud Firebase — dữ liệu tự động đồng bộ giữa Điện thoại & Máy tính.';
+      }
+      firebase.auth().onAuthStateChanged(async (user) => {
+        cloudUser = user;
+        if (user) {
+          const users = getUsersMap();
+          const label = user.email || user.uid;
+          users[label] = { username: label, fullName: user.displayName || '', passwordHash: 'cloud' };
+          saveUsersMap(users);
+          currentUser = label;
+          try {
+            localStorage.setItem(STORAGE_KEYS.CURRENT_USER, label);
+          } catch {
+            // Ignore
+          }
+          renderAccountBar();
+          await pullCloudData(user.uid);
+        }
+      });
+      return true;
+    } catch {
+      firebaseReady = false;
+      return false;
+    }
+  }
+
+  if (btnSaveFirebaseConfig) {
+    btnSaveFirebaseConfig.addEventListener('click', () => {
+      const parsed = parseFirebaseConfigInput(firebaseConfigInput.value);
+      if (!parsed || !parsed.apiKey || !parsed.databaseURL) {
+        authErrorEl.textContent = 'Cấu hình Firebase chưa hợp lệ (cần có apiKey và databaseURL).';
+        authErrorEl.hidden = false;
+        return;
+      }
+      try {
+        localStorage.setItem(STORAGE_KEYS.FIREBASE_CONFIG, JSON.stringify(parsed, null, 2));
+      } catch {
+        // Ignore
+      }
+      authErrorEl.hidden = true;
+      initFirebaseCloud();
+      showImportStatus('Đã kết nối Cloud Firebase! Bạn có thể đăng nhập bằng Google (Gmail) ngay bây giờ.', 'success');
+    });
+  }
+
+  if (btnClearFirebaseConfig) {
+    btnClearFirebaseConfig.addEventListener('click', () => {
+      try {
+        localStorage.removeItem(STORAGE_KEYS.FIREBASE_CONFIG);
+      } catch {
+        // Ignore
+      }
+      if (firebaseConfigInput) firebaseConfigInput.value = '';
+      firebaseReady = false;
+      cloudUser = null;
+      if (authCloudStatusEl) {
+        authCloudStatusEl.textContent = 'Đã ngắt kết nối Cloud Firebase (quay về lưu cục bộ trên trình duyệt).';
+      }
+    });
+  }
+
+  if (btnGoogleLogin) {
+    btnGoogleLogin.addEventListener('click', async () => {
+      authErrorEl.hidden = true;
+      if (!firebaseReady) {
+        authErrorEl.textContent =
+          'Để đăng nhập Gmail thật & đồng bộ giữa Điện thoại – Máy tính, hãy mở mục "Cài đặt Cloud Firebase" bên dưới và dán firebaseConfig miễn phí của bạn.';
+        authErrorEl.hidden = false;
+        return;
+      }
+      try {
+        const provider = new firebase.auth.GoogleAuthProvider();
+        const res = await firebase.auth().signInWithPopup(provider);
+        authDialog.close();
+        showImportStatus(`Đã đăng nhập Google: ${res.user.email} (đồng bộ Cloud).`, 'success');
+      } catch (err) {
+        authErrorEl.textContent = `Lỗi đăng nhập Google: ${err.message}`;
+        authErrorEl.hidden = false;
+      }
+    });
+  }
+
   let authMode = 'login';
 
   async function hashPassword(pw) {
@@ -2768,6 +3249,10 @@
 
   function logoutAccount() {
     saveState();
+    if (firebaseReady && cloudUser && typeof firebase !== 'undefined') {
+      firebase.auth().signOut().catch(() => {});
+      cloudUser = null;
+    }
     currentUser = null;
     catalog = [];
     registered = [];
@@ -2811,6 +3296,25 @@
       if (!username || password.length < 4) {
         authErrorEl.textContent = 'Vui lòng nhập tên đăng nhập và mật khẩu tối thiểu 4 ký tự.';
         authErrorEl.hidden = false;
+        return;
+      }
+
+      if (firebaseReady && username.includes('@') && typeof firebase !== 'undefined') {
+        try {
+          if (authMode === 'signup') {
+            const cred = await firebase.auth().createUserWithEmailAndPassword(username, password);
+            if (fullName) await cred.user.updateProfile({ displayName: fullName });
+            authDialog.close();
+            showImportStatus(`Đã tạo tài khoản Cloud "${username}" và đồng bộ dữ liệu!`, 'success');
+          } else {
+            await firebase.auth().signInWithEmailAndPassword(username, password);
+            authDialog.close();
+            showImportStatus(`Đã đăng nhập Cloud "${username}" và khôi phục dữ liệu!`, 'success');
+          }
+        } catch (err) {
+          authErrorEl.textContent = `Lỗi Firebase Auth: ${err.message}`;
+          authErrorEl.hidden = false;
+        }
         return;
       }
 
@@ -2938,7 +3442,9 @@
     });
   }
 
-  // Khôi phục phiên đăng nhập nếu đã đăng nhập trước đó
+  // Khởi tạo Firebase Cloud nếu đã cấu hình & khôi phục phiên đăng nhập
+  initFirebaseCloud();
+  if (currentUser && getUsersMap()[currentUser]) {
   if (currentUser && getUsersMap()[currentUser]) {
     applyAccountSession(currentUser, false);
   } else {

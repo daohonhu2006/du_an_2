@@ -9,6 +9,10 @@
   <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
   <!-- html2canvas for exporting the timetable as PNG image -->
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <!-- Firebase Compat SDKs for real Google/Gmail login & cross-device Cloud Sync -->
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-database-compat.js"></script>
 </head>
 <body>
   <header class="app-header">
@@ -60,6 +64,9 @@
       </button>
       <button type="button" role="tab" id="tab-tuition" class="view-tab" aria-selected="false" data-view="tuition">
         Tính học phí
+      </button>
+      <button type="button" role="tab" id="tab-ai" class="view-tab" aria-selected="false" data-view="ai">
+        AI Xếp Lịch
       </button>
       <button type="button" role="tab" id="tab-excel" class="view-tab" aria-selected="false" data-view="excel">
         File Excel &amp; Quy định
@@ -298,6 +305,58 @@
       </section>
     </div>
 
+    <!-- Panel 3c: AI Schedule Analyzer -->
+    <div id="panel-ai" role="tabpanel" aria-labelledby="tab-ai" hidden>
+      <section class="card ai-section" aria-labelledby="ai-title">
+        <div class="section-header">
+          <div>
+            <h2 id="ai-title">Trợ Lý AI Phân Tích &amp; Xếp Lịch Nhanh HUIT</h2>
+            <p class="muted">Chọn các môn bạn muốn đăng ký kỳ này — AI tự động phân tích toàn bộ lớp mở, loại bỏ trùng lịch (LT, TH, giờ thực tế, ngày Bắt đầu–Kết thúc) và gợi ý các tổ hợp tối ưu để đăng ký trong 1 bấm.</p>
+          </div>
+        </div>
+
+        <div class="ai-layout">
+          <div class="ai-controls-card">
+            <label for="ai-subject-search" class="form-label-sm"><strong>1. Chọn các môn muốn học kỳ này:</strong></label>
+            <input type="search" id="ai-subject-search" class="input" placeholder="Tìm tên môn để tích chọn nhanh..." style="width:100%;margin-bottom:0.5rem;">
+            <div id="ai-subject-checklist" class="ai-subject-checklist"></div>
+
+            <div style="margin-top:0.85rem;">
+              <strong style="font-size:0.86rem;">2. Tiêu chí ưu tiên của bạn:</strong>
+              <div class="ai-prefs-grid">
+                <label class="ai-pref-item"><input type="checkbox" id="ai-pref-no-evening"> Né buổi tối (Tiết 13–16)</label>
+                <label class="ai-pref-item"><input type="checkbox" id="ai-pref-no-weekend"> Né Thứ 7 &amp; Chủ nhật</label>
+                <label class="ai-pref-item"><input type="checkbox" id="ai-pref-elearning"> Ưu tiên E_learning (HUITx)</label>
+                <label class="ai-pref-item"><input type="checkbox" id="ai-pref-compact-days" checked> Gom lịch ít ngày nhất</label>
+                <label class="ai-pref-item"><input type="checkbox" id="ai-pref-keep-registered" checked> Giữ các môn đã đăng ký hiện tại</label>
+              </div>
+            </div>
+
+            <button type="button" id="btn-ai-analyze" class="btn btn-primary" style="width:100%;margin-top:0.9rem;">
+              AI Phân tích &amp; Đề xuất lịch ngay
+            </button>
+
+            <details class="ai-gemini-box" style="margin-top:1rem;">
+              <summary style="cursor:pointer;font-weight:600;font-size:0.86rem;">Hỏi thêm Gemini AI (tùy chọn API Key)</summary>
+              <div style="display:flex;flex-direction:column;gap:0.5rem;margin-top:0.6rem;">
+                <input type="password" id="gemini-api-key" class="input" placeholder="Dán Gemini API Key (aistudio.google.com)">
+                <textarea id="gemini-prompt" class="input" rows="2" placeholder="VD: Phân tích giúp tôi nên chọn lớp nào để học nhẹ nhàng, tránh buổi tối..."></textarea>
+                <button type="button" id="btn-gemini-ask" class="btn btn-sm btn-outline">Hỏi Gemini phân tích các môn đã chọn</button>
+                <div id="gemini-response" class="gemini-response" hidden></div>
+              </div>
+            </details>
+          </div>
+
+          <div class="ai-results-card">
+            <h3 style="margin:0 0 0.65rem;font-size:0.98rem;color:var(--huit-navy);">Kết quả AI phân tích &amp; đề xuất</h3>
+            <div id="ai-results-list" class="ai-results-list">
+              <div class="muted small-note">Hãy tích chọn các môn bên trái rồi bấm <strong>AI Phân tích &amp; Đề xuất lịch ngay</strong>.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
     <!-- Panel 4: Excel Import / Export & HUIT Rules -->
     <div id="panel-excel" role="tabpanel" aria-labelledby="tab-excel" hidden>
       <section class="card excel-bar" aria-labelledby="excel-section-title">
@@ -330,6 +389,17 @@
               Xóa dữ liệu
             </button>
           </div>
+        </div>
+        <div class="excel-mode-bar" role="group" aria-label="Chế độ cập nhật file Excel">
+          <span class="muted"><strong>Chế độ khi tải file mới:</strong></span>
+          <label class="tuition-radio-label">
+            <input type="radio" name="excel-import-mode" value="replace" checked>
+            <span>Thay thế danh sách mở mới (vẫn giữ các môn đã đăng ký)</span>
+          </label>
+          <label class="tuition-radio-label">
+            <input type="radio" name="excel-import-mode" value="update">
+            <span>Update / Gộp thêm lớp mới vào danh sách hiện tại</span>
+          </label>
         </div>
         <div id="excel-dropzone" class="excel-dropzone" style="margin-top: 1rem;">
           <div class="dropzone-title">Kéo thả file Excel Thời khóa biểu dự kiến HUIT vào đây</div>
@@ -458,14 +528,18 @@
       </form>
     </div>
     <div class="dialog-body">
+      <button type="button" id="btn-google-login" class="btn btn-outline" style="width:100%;font-weight:700;">
+        Đăng nhập nhanh bằng Google (Gmail)
+      </button>
+      <div class="auth-divider"><span>hoặc dùng Email / MSSV</span></div>
       <div class="auth-mode-tabs" role="tablist" aria-label="Chọn đăng nhập hoặc đăng ký">
         <button type="button" role="tab" id="auth-tab-login" class="auth-mode-btn" aria-selected="true" data-auth-mode="login">Đăng nhập</button>
         <button type="button" role="tab" id="auth-tab-signup" class="auth-mode-btn" aria-selected="false" data-auth-mode="signup">Tạo tài khoản mới</button>
       </div>
       <form id="auth-form" class="auth-form" autocomplete="on">
         <div class="form-field">
-          <label for="auth-username">Mã số sinh viên / Tên đăng nhập</label>
-          <input type="text" id="auth-username" class="input" required autocomplete="username" placeholder="Ví dụ: 2001221234">
+          <label for="auth-username">Email (Gmail) hoặc MSSV</label>
+          <input type="text" id="auth-username" class="input" required autocomplete="username" placeholder="Ví dụ: tenban@gmail.com hoặc 2001221234">
         </div>
         <div class="form-field" id="auth-fullname-wrap" hidden>
           <label for="auth-fullname">Họ và tên</label>
@@ -473,14 +547,26 @@
         </div>
         <div class="form-field">
           <label for="auth-password">Mật khẩu</label>
-          <input type="password" id="auth-password" class="input" required minlength="4" autocomplete="current-password" placeholder="Nhập mật khẩu (tối thiểu 4 ký tự)">
+          <input type="password" id="auth-password" class="input" required minlength="6" autocomplete="current-password" placeholder="Nhập mật khẩu (tối thiểu 6 ký tự)">
         </div>
         <div id="auth-error" class="auth-error" role="alert" hidden></div>
-        <p class="muted small-note">Dữ liệu học phần, Thời khóa biểu và học phí được lưu tự động theo tài khoản trên trình duyệt, không bị mất khi đóng trang.</p>
+        <p id="auth-cloud-status" class="muted small-note">Chế độ hiện tại: Lưu cục bộ trên trình duyệt. Kết nối Firebase bên dưới để đồng bộ thật giữa Điện thoại &amp; Máy tính.</p>
         <div class="auth-submit-row">
           <button type="submit" id="auth-submit-btn" class="btn btn-primary" style="width:100%;">Đăng nhập</button>
         </div>
       </form>
+
+      <details class="firebase-setup-box">
+        <summary style="cursor:pointer;font-weight:600;font-size:0.84rem;">Cài đặt Cloud Firebase (để đăng nhập Gmail thật &amp; đồng bộ Điện thoại ↔ Máy tính)</summary>
+        <div style="display:flex;flex-direction:column;gap:0.45rem;margin-top:0.55rem;">
+          <p class="muted small-note" style="margin:0;">1. Tạo project miễn phí tại <strong>console.firebase.google.com</strong> → bật <strong>Authentication</strong> (Google + Email/Password) &amp; <strong>Realtime Database</strong>.<br>2. Dán đoạn <code>firebaseConfig</code> (JSON hoặc object) vào ô dưới rồi bấm Lưu:</p>
+          <textarea id="firebase-config-input" class="input" rows="4" placeholder='{"apiKey":"...","authDomain":"...","databaseURL":"...","projectId":"..."}'></textarea>
+          <div style="display:flex;gap:0.45rem;">
+            <button type="button" id="btn-save-firebase-config" class="btn btn-sm btn-primary">Lưu &amp; Kết nối Cloud</button>
+            <button type="button" id="btn-clear-firebase-config" class="btn btn-sm btn-ghost">Ngắt kết nối</button>
+          </div>
+        </div>
+      </details>
     </div>
   </dialog>
 
