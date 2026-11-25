@@ -31,6 +31,7 @@
   // DOM Elements
   const themeSelect = document.getElementById('theme-select');
   const catalogTbody = document.getElementById('catalog-tbody');
+  const catalogPaginationEl = document.getElementById('catalog-pagination');
   const catalogTableWrap = document.getElementById('catalog-table-wrap');
   const excelDropzone = document.getElementById('excel-dropzone');
   const catalogCount = document.getElementById('catalog-count');
@@ -200,29 +201,49 @@
     return Math.round(total * coverage);
   }
 
+  const CATALOG_PAGE_SIZE = 80;
+  let catalogVisibleLimit = CATALOG_PAGE_SIZE;
   let activeSuggestionIndex = -1;
   let currentSuggestions = [];
+  let cachedSuggestionPool = [];
+  let searchIndexMap = new Map();
 
-  function buildSuggestionPool() {
+  function rebuildSearchIndex() {
     const map = new Map();
     const add = (type, label) => {
       const clean = String(label || '').trim();
       if (!clean) return;
       const key = `${type}::${clean}`;
-      if (!map.has(key)) map.set(key, { type, label: clean });
+      if (!map.has(key)) map.set(key, { type, label: clean, norm: stripDiacritics(clean) });
     };
 
+    const nextIndex = new Map();
     for (const s of catalog) {
       add('Môn học', s.tenHP);
       if (s.lopHoc) add('Lớp', s.lopHoc);
       if (s.ghiChu) add('Hình thức', s.ghiChu);
       add('Mã LHP', s.maLHP);
-      for (const item of getSectionSessions(s).all) {
+      const secSessions = getSectionSessions(s).all;
+      for (const item of secSessions) {
         if (item.sess.gv) add('Giảng viên', item.sess.gv);
         if (item.sess.phong) add('Phòng', item.sess.phong);
       }
+
+      const fields = [
+        s.tenHP,
+        s.lopHoc || '',
+        s.maLHP,
+        s.maHP,
+        s.ghiChu || '',
+        ...secSessions.flatMap((i) => [i.sess.gv || '', i.sess.phong || '']),
+      ];
+      nextIndex.set(s.maLHP, {
+        haystackNorm: stripDiacritics(fields.join(' ')),
+        fields,
+      });
     }
-    return Array.from(map.values());
+    cachedSuggestionPool = Array.from(map.values());
+    searchIndexMap = nextIndex;
   }
 
   function hideSuggestions() {
@@ -233,17 +254,36 @@
 
   function renderSuggestions() {
     const q = searchInput.value.trim();
-    if (!q) {
+    const qNorm = stripDiacritics(q);
+    if (!qNorm) {
       hideSuggestions();
       return;
     }
 
-    const pool = buildSuggestionPool();
-    currentSuggestions = pool
-      .map((item) => ({ ...item, score: fuzzyScore(q, item.label) }))
-      .filter((item) => item.score > 0)
-      .sort((a, b) => b.score - a.score || a.label.localeCompare(b.label, 'vi'))
-      .slice(0, 8);
+    // Bước 1: Quét nhanh các chuỗi khớp trực tiếp không dấu (tránh chạy Levenshtein trên hàng nghìn mục)
+    const direct = [];
+    for (const item of cachedSuggestionPool) {
+      if (item.norm === qNorm) direct.push({ ...item, score: 100 });
+      else if (item.norm.startsWith(qNorm)) direct.push({ ...item, score: 90 });
+      else if (item.norm.includes(qNorm)) direct.push({ ...item, score: 80 });
+    }
+
+    if (direct.length >= 8) {
+      currentSuggestions = direct
+        .sort((a, b) => b.score - a.score || a.label.localeCompare(b.label, 'vi'))
+        .slice(0, 8);
+    } else {
+      const directSet = new Set(direct.map((d) => `${d.type}::${d.label}`));
+      const fuzzy = [];
+      for (const item of cachedSuggestionPool) {
+        if (directSet.has(`${item.type}::${item.label}`)) continue;
+        const score = fuzzyScore(q, item.label);
+        if (score > 0) fuzzy.push({ ...item, score });
+      }
+      currentSuggestions = [...direct, ...fuzzy]
+        .sort((a, b) => b.score - a.score || a.label.localeCompare(b.label, 'vi'))
+        .slice(0, 8);
+    }
 
     if (currentSuggestions.length === 0) {
       hideSuggestions();
@@ -739,6 +779,7 @@
     if (subjects.includes(prevSubject)) filterSubject.value = prevSubject;
     if (classes.includes(prevClass)) filterClass.value = prevClass;
     if (lecturers.includes(prevLecturer)) filterLecturer.value = prevLecturer;
+    rebuildSearchIndex();
   }
 
   function sessionMatchesPeriodRange(sess, sessionType) {
@@ -785,12 +826,12 @@
 
       if (sessionVal && !secSessions.some((i) => sessionMatchesPeriodRange(i.sess, sessionVal))) return false;
 
-      const isRegistered = registered.some((r) => r.maLHP === sec.maLHP);
-      const evalRes = evaluateCandidate(sec);
-
-      if (filterMode === 'valid') return isRegistered || !evalRes.hasConflict;
-      if (filterMode === 'conflict') return !isRegistered && evalRes.hasConflict;
-      if (filterMode === 'registered') return isRegistered;
+      if (filterMode === 'registered') return registeredSet.has(sec.maLHP);
+      if (filterMode === 'valid' || filterMode === 'conflict') {
+        const isReg = registeredSet.has(sec.maLHP);
+        const evalRes = evaluateCandidate(sec);
+        return filterMode === 'valid' ? isReg || !evalRes.hasConflict : !isReg && evalRes.hasConflict;
+      }
       if (filterMode === 'elearning') {
         const allText = [
           sec.ghiChu || '',
@@ -804,12 +845,15 @@
       return true;
     };
 
+    const registeredSet = new Set(registered.map((r) => r.maLHP));
     const baseList = catalog.filter(matchesOtherFilters);
     let usedFuzzyFallback = false;
 
     let filtered = baseList;
     if (normQuery) {
       const exactMatches = baseList.filter((sec) => {
+        const idxEntry = searchIndexMap.get(sec.maLHP);
+        if (idxEntry) return idxEntry.haystackNorm.includes(normQuery);
         const secSessions = getSectionSessions(sec).all;
         const haystack = stripDiacritics(
           [
@@ -831,14 +875,10 @@
         usedFuzzyFallback = true;
         filtered = baseList
           .map((sec) => {
-            const secSessions = getSectionSessions(sec).all;
-            const fields = [
-              sec.tenHP,
-              sec.lopHoc || '',
-              sec.maLHP,
-              sec.maHP,
-              ...secSessions.flatMap((i) => [i.sess.gv || '', i.sess.phong || '']),
-            ];
+            const idxEntry = searchIndexMap.get(sec.maLHP);
+            const fields = idxEntry
+              ? idxEntry.fields
+              : [sec.tenHP, sec.lopHoc || '', sec.maLHP, sec.maHP];
             const bestScore = Math.max(...fields.map((f) => fuzzyScore(rawQuery, f)));
             return { sec, bestScore };
           })
@@ -848,11 +888,13 @@
       }
     }
 
+    const visibleItems = filtered.slice(0, catalogVisibleLimit);
     catalogCount.textContent = usedFuzzyFallback
-      ? `Không khớp chính xác "${rawQuery}" — đang hiển thị ${filtered.length} gợi ý gần đúng`
-      : `Hiển thị ${filtered.length} / ${catalog.length} lớp học phần`;
+      ? `Không khớp chính xác "${rawQuery}" — hiển thị ${visibleItems.length} / ${filtered.length} gợi ý gần đúng`
+      : `Hiển thị ${visibleItems.length} / ${filtered.length} lớp (tổng ${catalog.length} lớp)`;
 
     if (filtered.length === 0) {
+      if (catalogPaginationEl) catalogPaginationEl.hidden = true;
       catalogTbody.innerHTML = `
         <tr>
           <td colspan="7" style="text-align:center; padding: 2rem; color: var(--text-muted);">
@@ -863,9 +905,25 @@
       return;
     }
 
-    catalogTbody.innerHTML = filtered
+    if (catalogPaginationEl) {
+      const remaining = filtered.length - visibleItems.length;
+      if (remaining > 0) {
+        catalogPaginationEl.hidden = false;
+        catalogPaginationEl.innerHTML = `
+          <span class="muted">Đang hiện ${visibleItems.length}/${filtered.length} lớp</span>
+          <button type="button" id="btn-load-more-catalog" class="btn btn-sm btn-outline">
+            Xem thêm (+${Math.min(CATALOG_PAGE_SIZE, remaining)} lớp)
+          </button>
+        `;
+      } else {
+        catalogPaginationEl.hidden = true;
+        catalogPaginationEl.innerHTML = '';
+      }
+    }
+
+    catalogTbody.innerHTML = visibleItems
       .map((sec) => {
-        const isRegistered = registered.some((r) => r.maLHP === sec.maLHP);
+        const isRegistered = registeredSet.has(sec.maLHP);
         const evalRes = evaluateCandidate(sec);
 
         let rowClass = '';
@@ -2308,10 +2366,25 @@
     tab.addEventListener('click', () => switchView(tab.dataset.view));
   }
 
+  let suggestTimer = null;
+  let catalogTimer = null;
+
   searchInput.addEventListener('input', () => {
-    renderSuggestions();
-    renderCatalog();
+    catalogVisibleLimit = CATALOG_PAGE_SIZE;
+    clearTimeout(suggestTimer);
+    clearTimeout(catalogTimer);
+    suggestTimer = setTimeout(renderSuggestions, 90);
+    catalogTimer = setTimeout(renderCatalog, 160);
   });
+
+  if (catalogPaginationEl) {
+    catalogPaginationEl.addEventListener('click', (e) => {
+      if (e.target.closest('#btn-load-more-catalog')) {
+        catalogVisibleLimit += CATALOG_PAGE_SIZE;
+        renderCatalog();
+      }
+    });
+  }
 
   searchInput.addEventListener('focus', () => {
     if (searchInput.value.trim()) renderSuggestions();
@@ -2357,17 +2430,22 @@
       hideSuggestions();
     }
   });
+  const resetAndRenderCatalog = () => {
+    catalogVisibleLimit = CATALOG_PAGE_SIZE;
+    renderCatalog();
+  };
+
   filterSubject.addEventListener('change', () => {
     if (searchInput.value.trim() && filterSubject.value && searchInput.value.trim() !== filterSubject.value) {
       searchInput.value = '';
     }
-    renderCatalog();
+    resetAndRenderCatalog();
   });
-  filterClass.addEventListener('change', renderCatalog);
-  filterLecturer.addEventListener('change', renderCatalog);
-  filterDay.addEventListener('change', renderCatalog);
-  filterSession.addEventListener('change', renderCatalog);
-  filterStatus.addEventListener('change', renderCatalog);
+  filterClass.addEventListener('change', resetAndRenderCatalog);
+  filterLecturer.addEventListener('change', resetAndRenderCatalog);
+  filterDay.addEventListener('change', resetAndRenderCatalog);
+  filterSession.addEventListener('change', resetAndRenderCatalog);
+  filterStatus.addEventListener('change', resetAndRenderCatalog);
 
   btnResetFilters.addEventListener('click', () => {
     searchInput.value = '';
