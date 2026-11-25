@@ -446,15 +446,45 @@
 
   function parseExcelDate(val) {
     if (val === undefined || val === null) return null;
+    if (val instanceof Date && !Number.isNaN(val.getTime())) {
+      const year = val.getFullYear();
+      const month = val.getMonth() + 1;
+      const day = val.getDate();
+      return {
+        iso: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+        display: `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year}`,
+      };
+    }
+
+    // Excel serial date (number hoặc chuỗi số nguyên/thập phân)
+    if (typeof val === 'number' || /^\d{4,5}(\.\d+)?$/.test(String(val).trim())) {
+      const serial = Math.floor(Number(val));
+      if (serial > 20000 && serial < 70000) {
+        const utc = new Date(Date.UTC(1899, 11, 30) + serial * 86400000);
+        const year = utc.getUTCFullYear();
+        const month = utc.getUTCMonth() + 1;
+        const day = utc.getUTCDate();
+        return {
+          iso: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+          display: `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year}`,
+        };
+      }
+    }
+
     const raw = String(val).trim();
     if (!raw) return null;
 
-    // dd/mm/yyyy hoặc d/m/yyyy hoặc dd-mm-yyyy
+    // dd/mm/yyyy hoặc d/m/yyyy hoặc fallback m/d/yy
     const dmy = raw.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
     if (dmy) {
-      const day = Number(dmy[1]);
-      const month = Number(dmy[2]);
+      let day = Number(dmy[1]);
+      let month = Number(dmy[2]);
       const year = dmy[3].length === 2 ? 2000 + Number(dmy[3]) : Number(dmy[3]);
+      if (month > 12 && day <= 12) {
+        const tmp = day;
+        day = month;
+        month = tmp;
+      }
       if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
         const iso = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
         const display = `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year}`;
@@ -471,21 +501,6 @@
       const iso = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
       const display = `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year}`;
       return { iso, display };
-    }
-
-    // Excel serial date
-    if (/^\d{4,5}$/.test(raw)) {
-      const serial = Number(raw);
-      if (serial > 20000 && serial < 70000) {
-        const utc = new Date(Date.UTC(1899, 11, 30) + serial * 86400000);
-        const year = utc.getUTCFullYear();
-        const month = utc.getUTCMonth() + 1;
-        const day = utc.getUTCDate();
-        return {
-          iso: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
-          display: `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year}`,
-        };
-      }
     }
     return null;
   }
@@ -1335,7 +1350,14 @@
     return 'lt';
   }
 
-  function parseHuitMatrix(matrix) {
+  function getRawSheetCell(sheet, r, c) {
+    if (!sheet || c < 0 || r < 0) return undefined;
+    const addr = XLSX.utils.encode_cell({ r, c });
+    const cell = sheet[addr];
+    return cell ? cell.v : undefined;
+  }
+
+  function parseHuitMatrix(matrix, sheet = null) {
     // Tìm dòng tiêu đề chứa Mã LHP và Tên môn học (trong 25 dòng đầu)
     let headerRowIdx = -1;
     for (let r = 0; r < Math.min(25, matrix.length); r++) {
@@ -1400,12 +1422,14 @@
         colIdx.ghiChu === -1
       ) {
         colIdx.ghiChu = c;
-      } else if (
-        colIdx.batDau !== -1 &&
-        colIdx.ketThuc === -1 &&
-        (/^t0*\d+$/.test(key) || (h1.includes('thoigianhoc') && /^\d+$/.test(h2)))
-      ) {
-        const numMatch = key.match(/\d+/);
+      }
+    }
+
+    // Mọi cột nằm giữa Bắt đầu và Kết thúc đều là cột tuần học (T1..T30)
+    if (colIdx.batDau !== -1 && colIdx.ketThuc !== -1 && colIdx.ketThuc > colIdx.batDau + 1) {
+      for (let c = colIdx.batDau + 1; c < colIdx.ketThuc; c++) {
+        const h2 = hasSubHeader ? normalizeHeader(row2[c]) : normalizeHeader(row1[c]);
+        const numMatch = h2.match(/\d+/);
         const weekLabel = numMatch ? `T${Number(numMatch[0])}` : `T${colIdx.weekCols.length + 1}`;
         colIdx.weekCols.push({ col: c, label: weekLabel });
       }
@@ -1488,8 +1512,10 @@
         if (!sec.ghiChu && ghiChu) sec.ghiChu = ghiChu;
       }
 
-      const batDauParsed = colIdx.batDau !== -1 ? parseExcelDate(row[colIdx.batDau]) : null;
-      const ketThucParsed = colIdx.ketThuc !== -1 ? parseExcelDate(row[colIdx.ketThuc]) : null;
+      const rawBatDau = getRawSheetCell(sheet, r, colIdx.batDau);
+      const rawKetThuc = getRawSheetCell(sheet, r, colIdx.ketThuc);
+      const batDauParsed = colIdx.batDau !== -1 ? parseExcelDate(rawBatDau !== undefined ? rawBatDau : row[colIdx.batDau]) : null;
+      const ketThucParsed = colIdx.ketThuc !== -1 ? parseExcelDate(rawKetThuc !== undefined ? rawKetThuc : row[colIdx.ketThuc]) : null;
 
       const sessObj = {
         thu,
@@ -1530,7 +1556,7 @@
 
         // 1. Thử đọc theo định dạng Thời khóa biểu dự kiến HUIT (header 2 tầng + merge ô)
         const matrix = expandSheetMergesToMatrix(firstSheet);
-        const huitResult = parseHuitMatrix(matrix);
+        const huitResult = parseHuitMatrix(matrix, firstSheet);
         if (huitResult && huitResult.sections.length > 0) {
           catalog = huitResult.sections;
           const validCodes = new Set(catalog.map((s) => s.maLHP));
