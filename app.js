@@ -3040,17 +3040,28 @@
     }
   }
 
+  const DEFAULT_FIREBASE_CONFIG = {
+    apiKey: 'AIzaSyDg4zzTLX5TvgUoE4Y--Z5Y0lP1wlOos6Y',
+    authDomain: 'huit-dkhp.firebaseapp.com',
+    databaseURL: 'https://huit-dkhp-default-rtdb.asia-southeast1.firebasedatabase.app',
+    projectId: 'huit-dkhp',
+    storageBucket: 'huit-dkhp.firebasestorage.app',
+    messagingSenderId: '920003178715',
+    appId: '1:920003178715:web:4cd8e9b3bf990b68741cfe',
+  };
+
   function initFirebaseCloud() {
     if (typeof firebase === 'undefined') return false;
-    let cfg = null;
+    let cfg = DEFAULT_FIREBASE_CONFIG;
     try {
       const raw = localStorage.getItem(STORAGE_KEYS.FIREBASE_CONFIG);
       if (raw) {
         if (firebaseConfigInput) firebaseConfigInput.value = raw;
-        cfg = parseFirebaseConfigInput(raw);
+        const customCfg = parseFirebaseConfigInput(raw);
+        if (customCfg && customCfg.apiKey && customCfg.databaseURL) cfg = customCfg;
       }
     } catch {
-      cfg = null;
+      // Use default config
     }
 
     if (!cfg || !cfg.apiKey || !cfg.databaseURL) {
@@ -3142,6 +3153,11 @@
         authDialog.close();
         showImportStatus(`Đã đăng nhập Google: ${res.user.email} (đồng bộ Cloud).`, 'success');
       } catch (err) {
+        if (err && (err.code === 'auth/popup-blocked' || err.code === 'auth/cancelled-popup-request')) {
+          const provider = new firebase.auth.GoogleAuthProvider();
+          firebase.auth().signInWithRedirect(provider);
+          return;
+        }
         authErrorEl.textContent = `Lỗi đăng nhập Google: ${err.message}`;
         authErrorEl.hidden = false;
       }
