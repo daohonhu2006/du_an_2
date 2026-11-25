@@ -1541,6 +1541,21 @@
     return { sections: Array.from(grouped.values()), errors };
   }
 
+  function syncRegisteredWithCatalog() {
+    const catalogByCode = new Map(catalog.map((s) => [s.maLHP, s]));
+    registered = registered
+      .filter((r) => catalogByCode.has(r.maLHP))
+      .map((r) => structuredClone(catalogByCode.get(r.maLHP)));
+    if (typeof calUserNavigated !== 'undefined' && !calUserNavigated) {
+      const earliest = getEarliestRegisteredStartDate();
+      if (earliest) {
+        calSelectedDate = earliest;
+        calViewYear = earliest.getFullYear();
+        calViewMonth = earliest.getMonth();
+      }
+    }
+  }
+
   function importExcelFile(file) {
     if (typeof XLSX === 'undefined') {
       showImportStatus('Không tải được thư viện đọc Excel (SheetJS). Vui lòng kiểm tra kết nối mạng.', 'error');
@@ -1559,8 +1574,7 @@
         const huitResult = parseHuitMatrix(matrix, firstSheet);
         if (huitResult && huitResult.sections.length > 0) {
           catalog = huitResult.sections;
-          const validCodes = new Set(catalog.map((s) => s.maLHP));
-          registered = registered.filter((r) => validCodes.has(r.maLHP));
+          syncRegisteredWithCatalog();
           saveState();
           renderAll();
 
@@ -1643,8 +1657,7 @@
         }
 
         catalog = parsedSections;
-        const validCodes = new Set(catalog.map((s) => s.maLHP));
-        registered = registered.filter((r) => validCodes.has(r.maLHP));
+        syncRegisteredWithCatalog();
         saveState();
         renderAll();
 
