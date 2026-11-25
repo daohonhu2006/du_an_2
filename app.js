@@ -3158,6 +3158,11 @@
           firebase.auth().signInWithRedirect(provider);
           return;
         }
+        if (err && err.code === 'auth/unauthorized-domain') {
+          authErrorEl.textContent = `Tên miền "${window.location.hostname}" chưa được cấp phép trên Firebase. Hãy vào Firebase Console → Authentication → Settings → Authorized domains → Add domain và thêm "${window.location.hostname}".`;
+          authErrorEl.hidden = false;
+          return;
+        }
         authErrorEl.textContent = `Lỗi đăng nhập Google: ${err.message}`;
         authErrorEl.hidden = false;
       }
