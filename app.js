@@ -3445,7 +3445,6 @@
   // Khởi tạo Firebase Cloud nếu đã cấu hình & khôi phục phiên đăng nhập
   initFirebaseCloud();
   if (currentUser && getUsersMap()[currentUser]) {
-  if (currentUser && getUsersMap()[currentUser]) {
     applyAccountSession(currentUser, false);
   } else {
     currentUser = null;
