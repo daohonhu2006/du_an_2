@@ -1543,9 +1543,10 @@
 
   function syncRegisteredWithCatalog() {
     const catalogByCode = new Map(catalog.map((s) => [s.maLHP, s]));
-    registered = registered
-      .filter((r) => catalogByCode.has(r.maLHP))
-      .map((r) => structuredClone(catalogByCode.get(r.maLHP)));
+    // Giữ nguyên các môn đã đăng ký theo tài khoản (không tự xóa), chỉ cập nhật thông tin mới nếu mã LHP có trong file
+    registered = registered.map((r) =>
+      catalogByCode.has(r.maLHP) ? structuredClone(catalogByCode.get(r.maLHP)) : r
+    );
     if (typeof calUserNavigated !== 'undefined' && !calUserNavigated) {
       const earliest = getEarliestRegisteredStartDate();
       if (earliest) {
