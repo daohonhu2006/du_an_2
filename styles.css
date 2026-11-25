@@ -1641,3 +1641,29 @@ dialog.auth-modal {
   max-height: 260px;
   overflow-y: auto;
 }
+
+.ai-days-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+}
+
+.ai-day-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.22rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ai-day-pill:has(input:checked) {
+  background: var(--huit-blue-soft);
+  border-color: var(--huit-blue);
+  color: var(--huit-navy);
+}

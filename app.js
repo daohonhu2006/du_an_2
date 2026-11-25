@@ -2672,7 +2672,10 @@
   // --- AI Schedule Analyzer & Optional Gemini AI ---
   const aiSubjectSearch = document.getElementById('ai-subject-search');
   const aiSubjectChecklist = document.getElementById('ai-subject-checklist');
-  const aiPrefNoEvening = document.getElementById('ai-pref-no-evening');
+  const aiSessionMode = document.getElementById('ai-session-mode');
+  const aiPrefStrictDays = document.getElementById('ai-pref-strict-days');
+  const aiPrefStrictSession = document.getElementById('ai-pref-strict-session');
+  const aiDayCheckboxes = Array.from(document.querySelectorAll('[data-ai-day]'));
   const aiPrefNoWeekend = document.getElementById('ai-pref-no-weekend');
   const aiPrefElearning = document.getElementById('ai-pref-elearning');
   const aiPrefCompactDays = document.getElementById('ai-pref-compact-days');
@@ -2710,18 +2713,85 @@
       .join('');
   }
 
+  function sessionMatchesAiMode(sess, mode) {
+    if (!sess || mode === 'any') return true;
+    if (mode === 'morning') return sess.end <= 6;
+    if (mode === 'afternoon') return sess.start >= 7 && sess.end <= 12;
+    if (mode === 'evening') return sess.start >= 13;
+    if (mode === 'daytime') return sess.end <= 12;
+    return true;
+  }
+
+  function sectionMatchesStrictAiFilters(sec, prefs) {
+    const sessions = getSectionSessions(sec).all;
+    for (const item of sessions) {
+      if (prefs.noWeekend && Number(item.sess.thu) >= 7) return false;
+      if (prefs.strictDays && prefs.preferredDays.size > 0 && !prefs.preferredDays.has(Number(item.sess.thu))) {
+        return false;
+      }
+      if (prefs.strictSession && !sessionMatchesAiMode(item.sess, prefs.sessionMode)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   function scoreSectionForAi(sec, prefs) {
     let score = 0;
     const sessions = getSectionSessions(sec).all;
     for (const item of sessions) {
-      if (prefs.noEvening && item.sess.end >= 13) score -= 50;
-      if (prefs.noWeekend && Number(item.sess.thu) >= 7) score -= 50;
+      const thu = Number(item.sess.thu);
+      if (prefs.noWeekend && thu >= 7) score -= 120;
+      if (prefs.preferredDays.size > 0) {
+        score += prefs.preferredDays.has(thu) ? 45 : -60;
+      }
+      if (prefs.sessionMode !== 'any') {
+        score += sessionMatchesAiMode(item.sess, prefs.sessionMode) ? 40 : -70;
+      }
     }
     if (prefs.preferElearning) {
       const text = `${sec.ghiChu || ''} ${sec.tinhChat || ''}`;
-      if (/e[_\s-]?learn|elen|huitx/i.test(text)) score += 30;
+      if (/e[_\s-]?learn|elen|huitx/i.test(text)) score += 35;
     }
     return score;
+  }
+
+  function evaluateComboMetrics(allSections, prefs) {
+    const byDay = new Map();
+    for (const s of allSections) {
+      for (const item of getSectionSessions(s).all) {
+        const thu = Number(item.sess.thu);
+        if (!byDay.has(thu)) byDay.set(thu, []);
+        byDay.get(thu).push({ start: item.sess.start, end: item.sess.end });
+      }
+    }
+
+    let idleGaps = 0;
+    let isolatedDays = 0;
+    for (const blocks of byDay.values()) {
+      blocks.sort((a, b) => a.start - b.start);
+      if (blocks.length === 1) isolatedDays++;
+      for (let i = 1; i < blocks.length; i++) {
+        const gap = blocks[i].start - blocks[i - 1].end - 1;
+        if (gap > 0) idleGaps += gap;
+      }
+    }
+
+    const daysCount = byDay.size;
+    const dayLabels = Array.from(byDay.keys())
+      .sort((a, b) => a - b)
+      .map(formatThu)
+      .join(', ');
+
+    let compactBonus = 0;
+    if (prefs.compactDays) {
+      // Thưởng mạnh cho ít ngày đi học, trừ điểm mạnh nếu có nhiều tiết trống chờ giữa giờ hoặc ngày học lẻ tẻ 1 ca
+      compactBonus += (8 - daysCount) * 40;
+      compactBonus -= idleGaps * 8;
+      compactBonus -= isolatedDays * 12;
+    }
+
+    return { daysCount, idleGaps, isolatedDays, dayLabels, compactBonus };
   }
 
   function runAiScheduleOptimizer() {
@@ -2732,8 +2802,15 @@
       return;
     }
 
+    const preferredDays = new Set(
+      aiDayCheckboxes.filter((cb) => cb.checked).map((cb) => Number(cb.value))
+    );
+
     const prefs = {
-      noEvening: Boolean(aiPrefNoEvening?.checked),
+      sessionMode: aiSessionMode ? aiSessionMode.value : 'any',
+      preferredDays,
+      strictDays: Boolean(aiPrefStrictDays?.checked),
+      strictSession: Boolean(aiPrefStrictSession?.checked),
       noWeekend: Boolean(aiPrefNoWeekend?.checked),
       preferElearning: Boolean(aiPrefElearning?.checked),
       compactDays: Boolean(aiPrefCompactDays?.checked),
@@ -2748,6 +2825,7 @@
     for (const subName of chosen) {
       const candidates = catalog
         .filter((s) => s.tenHP === subName && !baseSubjects.has(s.maHP))
+        .filter((s) => sectionMatchesStrictAiFilters(s, prefs))
         .filter((s) => {
           const allS = getSectionSessions(s).all;
           for (const e of baseRegistered) {
@@ -2761,11 +2839,11 @@
         })
         .map((s) => ({ sec: s, score: scoreSectionForAi(s, prefs) }))
         .sort((a, b) => b.score - a.score)
-        .slice(0, 12)
+        .slice(0, 20)
         .map((x) => x.sec);
 
       if (candidates.length === 0) {
-        aiResultsList.innerHTML = `<div class="conflict-alert-box">Môn <strong>${escapeHtml(subName)}</strong> không còn lớp nào không bị trùng với lịch đang giữ (hoặc đã được đăng ký sẵn).</div>`;
+        aiResultsList.innerHTML = `<div class="conflict-alert-box">Môn <strong>${escapeHtml(subName)}</strong> không có lớp nào thỏa điều kiện (hoặc bị trùng với lịch đang giữ). Bạn thử bỏ bớt dấu "Bắt buộc" xem nhé.</div>`;
         return;
       }
       buckets.push({ subName, candidates });
@@ -2776,18 +2854,20 @@
 
     const solutions = [];
     let steps = 0;
-    const MAX_STEPS = 8000;
+    const MAX_STEPS = 20000;
 
     function backtrack(idx, picked, totalScore) {
-      if (solutions.length >= 15 || steps > MAX_STEPS) return;
+      if (solutions.length >= 40 || steps > MAX_STEPS) return;
       steps++;
       if (idx === buckets.length) {
-        const daySet = new Set();
-        for (const s of [...baseRegistered, ...picked]) {
-          for (const item of getSectionSessions(s).all) daySet.add(Number(item.sess.thu));
-        }
-        const finalScore = totalScore + (prefs.compactDays ? (8 - daySet.size) * 15 : 0);
-        solutions.push({ picked: [...picked], score: finalScore, daysCount: daySet.size });
+        const metrics = evaluateComboMetrics([...baseRegistered, ...picked], prefs);
+        solutions.push({
+          picked: [...picked],
+          score: totalScore + metrics.compactBonus,
+          daysCount: metrics.daysCount,
+          idleGaps: metrics.idleGaps,
+          dayLabels: metrics.dayLabels,
+        });
         return;
       }
 
@@ -2818,11 +2898,11 @@
 
     if (solutions.length === 0) {
       aiResultsList.innerHTML =
-        '<div class="conflict-alert-box">Không tìm được tổ hợp nào không trùng lịch cho tất cả các môn đã chọn. Hãy bỏ bớt 1 môn hoặc bỏ bớt điều kiện lọc.</div>';
+        '<div class="conflict-alert-box">Không tìm được tổ hợp nào không trùng lịch cho tất cả các môn đã chọn. Hãy bỏ bớt 1 môn hoặc bỏ bớt điều kiện bắt buộc.</div>';
       return;
     }
 
-    solutions.sort((a, b) => b.score - a.score || a.daysCount - b.daysCount);
+    solutions.sort((a, b) => b.score - a.score || a.daysCount - b.daysCount || a.idleGaps - b.idleGaps);
     const topSolutions = solutions.slice(0, 3);
     window.__lastAiCombos = topSolutions;
 
@@ -2843,7 +2923,7 @@
             <div class="ai-combo-header">
               <div>
                 <strong>Phương án ${idx + 1}</strong>
-                <span class="badge badge-ok">${sol.picked.length} môn • ${totalTC} TC • Học ${sol.daysCount} ngày/tuần</span>
+                <span class="badge badge-ok">${sol.picked.length} môn • ${totalTC} TC • ${sol.daysCount} ngày (${escapeHtml(sol.dayLabels)}) • ${sol.idleGaps} tiết trống</span>
               </div>
               <button type="button" class="btn btn-sm btn-success" data-apply-ai-combo="${idx}">Đăng ký tổ hợp này</button>
             </div>

@@ -322,12 +322,34 @@
             <div id="ai-subject-checklist" class="ai-subject-checklist"></div>
 
             <div style="margin-top:0.85rem;">
-              <strong style="font-size:0.86rem;">2. Tiêu chí ưu tiên của bạn:</strong>
-              <div class="ai-prefs-grid">
-                <label class="ai-pref-item"><input type="checkbox" id="ai-pref-no-evening"> Né buổi tối (Tiết 13–16)</label>
+              <strong style="font-size:0.86rem;">2. Chọn buổi học &amp; ngày muốn học Full:</strong>
+              <div style="margin-top:0.45rem;">
+                <select id="ai-session-mode" class="select" style="width:100%;" aria-label="Chọn buổi học ưu tiên">
+                  <option value="any">Tất cả buổi (Sáng / Chiều / Tối)</option>
+                  <option value="morning">Full Buổi Sáng (Tiết 1–6)</option>
+                  <option value="afternoon">Full Buổi Chiều (Tiết 7–12)</option>
+                  <option value="evening">Full Buổi Tối (Tiết 13–16)</option>
+                  <option value="daytime">Sáng + Chiều (Né Tối)</option>
+                </select>
+              </div>
+              <div style="margin-top:0.55rem;">
+                <span class="muted small-note">Ưu tiên dồn vào các thứ (để trống = AI tự dồn ít ngày nhất):</span>
+                <div class="ai-days-row" role="group" aria-label="Chọn thứ muốn học full">
+                  <label class="ai-day-pill"><input type="checkbox" value="2" data-ai-day><span>T2</span></label>
+                  <label class="ai-day-pill"><input type="checkbox" value="3" data-ai-day><span>T3</span></label>
+                  <label class="ai-day-pill"><input type="checkbox" value="4" data-ai-day><span>T4</span></label>
+                  <label class="ai-day-pill"><input type="checkbox" value="5" data-ai-day><span>T5</span></label>
+                  <label class="ai-day-pill"><input type="checkbox" value="6" data-ai-day><span>T6</span></label>
+                  <label class="ai-day-pill"><input type="checkbox" value="7" data-ai-day><span>T7</span></label>
+                  <label class="ai-day-pill"><input type="checkbox" value="8" data-ai-day><span>CN</span></label>
+                </div>
+              </div>
+              <div class="ai-prefs-grid" style="margin-top:0.55rem;">
+                <label class="ai-pref-item"><input type="checkbox" id="ai-pref-strict-days"> Bắt buộc chỉ học trong các thứ đã tích</label>
+                <label class="ai-pref-item"><input type="checkbox" id="ai-pref-strict-session"> Bắt buộc đúng buổi đã chọn</label>
                 <label class="ai-pref-item"><input type="checkbox" id="ai-pref-no-weekend"> Né Thứ 7 &amp; Chủ nhật</label>
                 <label class="ai-pref-item"><input type="checkbox" id="ai-pref-elearning"> Ưu tiên E_learning (HUITx)</label>
-                <label class="ai-pref-item"><input type="checkbox" id="ai-pref-compact-days" checked> Gom lịch ít ngày nhất</label>
+                <label class="ai-pref-item"><input type="checkbox" id="ai-pref-compact-days" checked> Dồn lịch tối đa, hạn chế lịch lẻ tẻ</label>
                 <label class="ai-pref-item"><input type="checkbox" id="ai-pref-keep-registered" checked> Giữ các môn đã đăng ký hiện tại</label>
               </div>
             </div>
