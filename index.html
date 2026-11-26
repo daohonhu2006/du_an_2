@@ -91,30 +91,6 @@
             <button type="button" id="btn-reset-filters" class="btn btn-sm btn-ghost">Xóa bộ lọc</button>
           </div>
 
-          <!-- Quick Code / Batch Demo Box -->
-          <details class="quick-code-box" style="margin-bottom: 0.9rem;">
-            <summary class="quick-code-summary">Tạo mã nhanh &amp; Nhập danh sách Mã LHP / Môn học (Demo)</summary>
-            <div class="quick-code-body">
-              <div class="quick-code-modes" role="radiogroup" aria-label="Chế độ nhập nhanh">
-                <label class="tuition-radio-label">
-                  <input type="radio" name="quick-code-mode" value="lhp" checked>
-                  <span>Nhập nhanh Danh sách Mã LHP để đăng ký tự động (Demo)</span>
-                </label>
-                <label class="tuition-radio-label">
-                  <input type="radio" name="quick-code-mode" value="subject">
-                  <span>Nhập Danh sách Tên môn học để lọc các lớp học</span>
-                </label>
-              </div>
-              <textarea id="quick-code-input" class="input" rows="3" placeholder="Dán danh sách Mã LHP hoặc Tên môn (mỗi dòng 1 mục, hoặc cách nhau bằng dấu phẩy)..."></textarea>
-              <div class="quick-code-actions">
-                <button type="button" id="btn-run-quick-codes" class="btn btn-sm btn-primary">Chạy ngay (Demo)</button>
-                <button type="button" id="btn-fill-quick-codes" class="btn btn-sm btn-outline">Tạo mã từ môn đã đăng ký</button>
-                <button type="button" id="btn-clear-quick-codes" class="btn btn-sm btn-ghost">Xóa ô nhập</button>
-              </div>
-              <div id="quick-code-log" class="quick-code-log" hidden></div>
-            </div>
-          </details>
-
           <!-- Rich Filter Bar -->
           <div class="filter-grid" aria-label="Bộ lọc tìm kiếm học phần">
             <div class="search-autocomplete">
@@ -179,10 +155,7 @@
           <section class="card registered-section" aria-labelledby="registered-title">
             <div class="section-header compact">
               <h2 id="registered-title">Học phần đã đăng ký</h2>
-              <div style="display:flex;gap:0.4rem;">
-                <button type="button" id="btn-copy-codes" class="btn btn-sm btn-outline" title="Copy danh sách Mã LHP đã đăng ký">Copy Mã LHP</button>
-                <button type="button" id="btn-clear-registered" class="btn btn-sm btn-danger-outline">Xóa tất cả</button>
-              </div>
+              <button type="button" id="btn-clear-registered" class="btn btn-sm btn-danger-outline">Xóa tất cả</button>
             </div>
             <div id="registered-list" class="registered-list"></div>
           </section>
