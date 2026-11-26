@@ -206,6 +206,7 @@
   }
 
   const CATALOG_PAGE_SIZE = 80;
+  let activeQuickSubjectFilters = [];
   let catalogVisibleLimit = CATALOG_PAGE_SIZE;
   let activeSuggestionIndex = -1;
   let currentSuggestions = [];
@@ -836,6 +837,10 @@
     const filterMode = filterStatus.value;
 
     const matchesOtherFilters = (sec) => {
+      if (activeQuickSubjectFilters.length > 0) {
+        const subNorm = stripDiacritics(sec.tenHP);
+        if (!activeQuickSubjectFilters.some((q) => subNorm.includes(q))) return false;
+      }
       const secSessions = getSectionSessions(sec).all;
       if (subjectVal && sec.tenHP !== subjectVal) return false;
       if (classVal && (sec.lopHoc || '') !== classVal) return false;
@@ -2509,8 +2514,125 @@
     filterDay.value = '';
     filterSession.value = '';
     filterStatus.value = 'all';
+    activeQuickSubjectFilters = [];
+    catalogVisibleLimit = CATALOG_PAGE_SIZE;
     renderCatalog();
   });
+
+  // --- Quick Code / Batch Demo Logic ---
+  const quickCodeInput = document.getElementById('quick-code-input');
+  const quickCodeLog = document.getElementById('quick-code-log');
+  const btnRunQuickCodes = document.getElementById('btn-run-quick-codes');
+  const btnFillQuickCodes = document.getElementById('btn-fill-quick-codes');
+  const btnClearQuickCodes = document.getElementById('btn-clear-quick-codes');
+  const btnCopyCodes = document.getElementById('btn-copy-codes');
+
+  function copyCodesToClipboard() {
+    if (registered.length === 0) {
+      showImportStatus('Chưa có học phần nào đã đăng ký để copy Mã LHP.', 'error');
+      return;
+    }
+    const text = registered.map((r) => r.maLHP).join('\n');
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(
+        () => showImportStatus(`Đã copy ${registered.length} Mã LHP đã đăng ký vào bộ nhớ tạm.`, 'success'),
+        () => showImportStatus(`Mã LHP đã đăng ký: ${text.replace(/\n/g, ', ')}`, 'info')
+      );
+    } else {
+      showImportStatus(`Mã LHP đã đăng ký: ${text.replace(/\n/g, ', ')}`, 'info');
+    }
+  }
+
+  if (btnCopyCodes) btnCopyCodes.addEventListener('click', copyCodesToClipboard);
+
+  if (btnFillQuickCodes && quickCodeInput) {
+    btnFillQuickCodes.addEventListener('click', () => {
+      if (registered.length === 0) {
+        showImportStatus('Chưa có học phần nào đã đăng ký để tạo mã.', 'error');
+        return;
+      }
+      quickCodeInput.value = registered.map((r) => r.maLHP).join('\n');
+      showImportStatus(`Đã tạo danh sách ${registered.length} Mã LHP từ các môn đã đăng ký.`, 'success');
+    });
+  }
+
+  if (btnClearQuickCodes && quickCodeInput) {
+    btnClearQuickCodes.addEventListener('click', () => {
+      quickCodeInput.value = '';
+      activeQuickSubjectFilters = [];
+      if (quickCodeLog) quickCodeLog.hidden = true;
+      renderCatalog();
+    });
+  }
+
+  if (btnRunQuickCodes && quickCodeInput) {
+    btnRunQuickCodes.addEventListener('click', () => {
+      const raw = quickCodeInput.value.trim();
+      if (!raw) {
+        showImportStatus('Vui lòng nhập danh sách Mã LHP hoặc Tên môn học trước khi chạy.', 'error');
+        return;
+      }
+      const modeEl = document.querySelector('input[name="quick-code-mode"]:checked');
+      const mode = modeEl ? modeEl.value : 'lhp';
+
+      if (mode === 'subject') {
+        const tokens = raw
+          .split(/[\n,;]+/)
+          .map((t) => stripDiacritics(t))
+          .filter(Boolean);
+        activeQuickSubjectFilters = tokens;
+        catalogVisibleLimit = CATALOG_PAGE_SIZE;
+        renderCatalog();
+        if (quickCodeLog) {
+          quickCodeLog.innerHTML = `<div>Đã lọc danh sách theo <strong>${tokens.length}</strong> môn học vừa nhập.</div>`;
+          quickCodeLog.hidden = false;
+        }
+        return;
+      }
+
+      // Chế độ nhập nhanh Mã LHP để đăng ký hàng loạt (Demo)
+      activeQuickSubjectFilters = [];
+      const codes = raw
+        .split(/[\s,;]+/)
+        .map((c) => c.trim())
+        .filter(Boolean);
+
+      const logs = [];
+      let addedCount = 0;
+      const catalogMap = new Map(catalog.map((s) => [s.maLHP, s]));
+
+      for (const code of codes) {
+        const sec = catalogMap.get(code);
+        if (!sec) {
+          logs.push(`<div style="color:var(--danger-text);">[Không tìm thấy] <code>${escapeHtml(code)}</code> không có trong file Excel.</div>`);
+          continue;
+        }
+        if (registered.some((r) => r.maLHP === sec.maLHP)) {
+          logs.push(`<div class="muted">[Đã có] <code>${escapeHtml(code)}</code> (${escapeHtml(sec.tenHP)}) đã đăng ký trước đó.</div>`);
+          continue;
+        }
+        const evalRes = evaluateCandidate(sec);
+        if (evalRes.hasConflict) {
+          const reason = evalRes.timeConflicts.length
+            ? `trùng lịch với ${escapeHtml(evalRes.timeConflicts[0].existingSection.tenHP)}`
+            : `đã đăng ký lớp ${escapeHtml(evalRes.sameSubjectSection.maLHP)}`;
+          logs.push(`<div style="color:var(--warn-text);">[Bỏ qua — Trùng] <code>${escapeHtml(code)}</code> (${escapeHtml(sec.tenHP)}): ${reason}.</div>`);
+          continue;
+        }
+        registered.push(structuredClone(sec));
+        addedCount++;
+        logs.push(`<div style="color:var(--success);">[Thành công] <code>${escapeHtml(code)}</code> — ${escapeHtml(sec.tenHP)}</div>`);
+      }
+
+      saveState();
+      renderAll();
+      if (quickCodeLog) {
+        quickCodeLog.innerHTML = logs.join('');
+        quickCodeLog.hidden = false;
+      }
+      showImportStatus(`Đăng ký nhanh (Demo): thành công ${addedCount} / ${codes.length} mã lớp.`, addedCount > 0 ? 'success' : 'info');
+    });
+  }
 
   document.getElementById('btn-clear-registered').addEventListener('click', () => {
     registered = [];

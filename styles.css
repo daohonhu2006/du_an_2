@@ -1667,3 +1667,51 @@ dialog.auth-modal {
   border-color: var(--huit-blue);
   color: var(--huit-navy);
 }
+
+.quick-code-box {
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  padding: 0.6rem 0.85rem;
+  background: var(--surface-alt);
+}
+
+.quick-code-summary {
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 0.88rem;
+  color: var(--huit-navy);
+}
+
+.quick-code-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin-top: 0.65rem;
+}
+
+.quick-code-body .input {
+  width: 100%;
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+}
+
+.quick-code-modes,
+.quick-code-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.quick-code-log {
+  padding: 0.6rem 0.75rem;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  font-size: 0.8rem;
+  max-height: 180px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
